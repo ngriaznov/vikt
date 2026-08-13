@@ -375,3 +375,47 @@ Ceiling not reached: 0.451 with a linear model over rank features. The gap
 between that and rater self-consistency is the open territory, and it is now
 measurable per candidate: any proposed algorithm slots into `judgement.py` as a
 feature column and reports its held-out contribution within the hour.
+
+---
+
+# Addendum 3: round two of the search — four new fields admitted to measurement
+
+Five new analogies commissioned (ecology, science-of-science, information
+retrieval, sociology, geomorphology), implemented on branches
+claude/scorer-{trophic,disrupt,rarity,broker,strahler}. Each verified
+independently before measurement: default output byte-identical to the
+prototype, real score gradient, tests and clippy clean. `disrupt` came back
+degenerate on stack-machine bytecode (4 distinct values, mean 0.95 - CD's
+"cites its references" pattern never fires on single-use temporaries) and was
+sent back for statement-level condensation; it is excluded until it returns.
+
+Solo agreement with the oracle (mean per-function Spearman, 16 functions):
+
+  strahler   0.357   1 negative function   <- best solo, most robust yet
+  schur      0.341   2 negative            (pinned)
+  current    0.312   3 negative            (pinned)
+  trophic    0.265   6 negative            wins where position wins
+  current-fl 0.232   5 negative            (pinned)
+  broker     0.158   4 negative
+  rarity     0.025   6 negative
+
+Held-out ensemble (leave-one-function-out, all 18 signals + structure):
+
+  combined               0.506     was 0.451 with 14 signals
+  position null          0.359
+  beats best single on 12/16 functions
+
+The fitted weights put trophic (0.108) and strahler (0.103) straight into the
+top six, behind position/schur/current/pivot. rarity and broker carry small
+positive weight; they cost nothing and stay as minor instruments.
+
+Two findings worth recording:
+
+- strahler is the first algorithm with only ONE function ranked backwards.
+  Stream order's virtue is what it ignores: it does not care how MUCH flows,
+  only where independent derivations CONVERGE - and convergence points are
+  close to what the oracle calls important.
+- trophic behaves as designed: a graph-native stand-in for the positional
+  component of judgement (0.84 on get_close_matches, 0.70 on normpath,
+  0.61 on quantiles - all functions whose importance rises toward the end).
+  Position's weight dropped from 0.30 to 0.24 with trophic present.
