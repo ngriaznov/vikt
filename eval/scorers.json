@@ -12,111 +12,27 @@
   "flag": "--format json --scorer current"
  },
  {
-  "name": "magnitude",
-  "field": "enriched category theory (Leinster)",
-  "binary": "/workspace/wt-math4/target/release/salience",
-  "flag": "--format json --scorer magnitude"
- },
- {
   "name": "schur",
   "field": "Schur complement / graph zeta",
-  "binary": "/workspace/wt-math2/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/salience",
   "flag": "--format json --scorer schur"
- },
- {
-  "name": "observ",
-  "field": "structural controllability",
-  "binary": "/workspace/wt-observ/target/release/salience",
-  "flag": "--format json --scorer observ"
- },
- {
-  "name": "vitality",
-  "field": "resolvent / T-matrix vitality",
-  "binary": "/workspace/wt-alt1/target/release/salience",
-  "flag": "--format json --scorer vitality"
- },
- {
-  "name": "leak",
-  "field": "quantitative information flow",
-  "binary": "/workspace/wt-alt3/target/release/salience",
-  "flag": "--format json --scorer leak"
- },
- {
-  "name": "mincut",
-  "field": "max-flow / min-cut",
-  "binary": "/workspace/wt-mincut/target/release/salience",
-  "flag": "--format json --scorer mincut"
  },
  {
   "name": "pivot",
   "field": "reliability theory (Birnbaum)",
-  "binary": "/workspace/wt-sys2/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/salience",
   "flag": "--format json --scorer pivot"
- },
- {
-  "name": "current-flow",
-  "field": "resistor networks",
-  "binary": "/workspace/wt-alt4/target/release/salience",
-  "flag": "--format json --scorer current-flow"
- },
- {
-  "name": "hankel",
-  "field": "Hankel / Gramian, absorbing Markov",
-  "binary": "/workspace/wt-sys1/target/release/salience",
-  "flag": "--format json --scorer hankel"
- },
- {
-  "name": "flux",
-  "field": "flux balance analysis",
-  "binary": "/workspace/wt-fba/target/release/salience",
-  "flag": "--format json --scorer flux"
- },
- {
-  "name": "absorb",
-  "field": "absorbing Markov chains",
-  "binary": "/workspace/wt-alt2/target/release/salience",
-  "flag": "--format json --scorer absorb"
- },
- {
-  "name": "leverage",
-  "field": "matroid / statistical leverage",
-  "binary": "/workspace/wt-math3/target/release/salience",
-  "flag": "--format json --scorer leverage"
- },
- {
-  "name": "dirichlet",
-  "field": "Dirichlet forms / effective resistance",
-  "binary": "/workspace/wt-math1/target/release/salience",
-  "flag": "--format json --scorer dirichlet"
  },
  {
   "name": "trophic",
   "field": "food-web ecology (trophic levels)",
-  "binary": "/workspace/wt-trophic/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/salience",
   "flag": "--format json --scorer trophic"
- },
- {
-  "name": "rarity",
-  "field": "information retrieval (TF-IDF)",
-  "binary": "/workspace/wt-rarity/target/release/salience",
-  "flag": "--format json --scorer rarity"
- },
- {
-  "name": "broker",
-  "field": "sociology (Burt structural holes)",
-  "binary": "/workspace/wt-broker/target/release/salience",
-  "flag": "--format json --scorer broker"
  },
  {
   "name": "strahler",
   "field": "geomorphology (Horton-Strahler)",
-  "binary": "/workspace/wt-strahler/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/salience",
   "flag": "--format json --scorer strahler"
- },
- {
-  "name": "disrupt",
-  "field": "science of science (CD index)",
-  "binary": "/workspace/wt-disrupt/target/release/salience",
-  "flag": "--format json --scorer disrupt"
  }
 ]

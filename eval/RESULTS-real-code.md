@@ -45,3 +45,43 @@ weighted sum of within-function ranks, so the top requires convergent evidence
 from all five instruments at once. Dense uniform functions legitimately
 compress toward the middle; the `rank` field (percentile) is what editor
 heatmaps should paint from.
+
+---
+
+# The JS/TS transfer test
+
+With the oxc frontend landed, the oracle protocol ran on JavaScript and
+TypeScript: nine functions from lodash, express and zod (100 lines), labelled
+blind and committed (ff5345a) BEFORE any scorer ran on them. lodash chunk and
+debounce were excluded as contaminated. This is zero-shot transfer - the panel
+weights were fitted on Python and applied unchanged.
+
+| scorer | pooled rho | 95% CI |
+|---|---|---|
+| strahler | **0.733** | [0.62, 0.81] |
+| position (null) | 0.695 | [0.58, 0.78] |
+| panel (Python-fitted, zero-shot) | 0.603 | [0.46, 0.72] |
+| trophic | 0.572 | [0.42, 0.69] |
+| current | 0.512 | [0.35, 0.65] |
+| schur | 0.195 | [-0.01, 0.38] |
+| pivot | -0.138 | [-0.33, 0.06] |
+
+Four findings, in honesty order:
+
+1. **The panel transfers.** 0.603 zero-shot on a substrate the weights never
+   saw, above its own 0.517 on the language it was fitted for. The
+   combination is not a Python artifact.
+2. **But the position null is 0.695 here** - my labels on short JS utilities
+   are strongly end-weighted, and only strahler beats the null. Same lesson
+   as Python round one: reader labels on small functions are positional, and
+   claims above the null are the only claims worth making.
+3. **Instrument-substrate interaction is real.** On statement-granular AST
+   graphs, strahler doubles its Python performance (0.73 vs 0.36) while schur
+   collapses (0.20) and pivot inverts (-0.14). The five instruments are not
+   equally portable; a per-substrate refit is justified: LOFO on the JS
+   labels reaches 0.628 with strahler's weight doubled and schur/pivot near
+   zero.
+4. **The documented limitations showed up exactly where predicted.** memoize
+   0.41 - the closure-capture gap named in salience-js's docs. acceptParams
+   0.12 - an index-arithmetic scanner, the same statement-role residual as
+   fnmatch.translate and py_scanstring on Python.
