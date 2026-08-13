@@ -259,3 +259,72 @@ The finding that matters more than the ranking: the two targets correlate at
 A single salience number cannot serve both, and the tool should stop pretending
 otherwise — `schur` for the first, `leverage` for the second, and say which one
 is being asked.
+
+---
+
+# Addendum: can the tool be operated? — the separation test
+
+Rank correlation over all lines is a harder question than the tool claims to
+answer and a harder one than any consumer needs. An agent wants to know which
+lines it can skip. So: take the clearly-unimportant lines and the clearly-
+important ones, drop the ambiguous middle, and measure how often the scorer puts
+a member of the first below a member of the second. That is AUC, computed within
+each function and pooled. `eval/separation.py`.
+
+| scorer | vs reader labels | 95% CI | vs behaviour | 95% CI |
+|---|---|---|---|---|
+| **schur** | **0.616** | [0.55, 0.80] | 0.413 | [0.33, 0.52] |
+| current | 0.638 | [0.51, 0.92] | 0.489 | [0.42, 0.60] |
+| observ | 0.623 | [0.58, 0.80] | 0.475 | [0.31, 0.66] |
+| **absorb** | 0.349 | [0.25, 0.76] | **0.709** | [0.54, 0.85] |
+| pivot | 0.541 | [0.41, 0.87] | 0.695 | [0.54, 0.83] |
+| leverage | 0.279 | [0.12, 0.73] | 0.629 | [0.55, 0.74] |
+
+Stable under four different threshold choices each (`schur` 0.62–0.72 on reader
+labels, `absorb` 0.67–0.72 on behaviour), so this is not threshold shopping.
+Both leaders' intervals exclude 0.50. Both leaders are at or *below* chance on
+the other target.
+
+## And then the number that decides it
+
+AUC 0.70 sounds workable. It is not, because a filter has to be operated at a
+threshold. Keeping R% of the load-bearing lines, here is the share of noise
+lines that fall below the cut:
+
+| target | scorer | keep 99% | keep 95% | keep 90% | keep 80% |
+|---|---|---|---|---|---|
+| reader | schur | 0% | 0% | 0% | 40% |
+| reader | current | 0% | 25% | 35% | 35% |
+| behaviour | absorb | 0% | 0% | 0% | 0% |
+| behaviour | pivot | 0% | 0% | 10% | 19% |
+| behaviour | leverage | 0% | 0% | 20% | 44% |
+
+**At 95% recall the best scorer removes a quarter of the noise, and most remove
+none.** To drop 40% of the noise you must discard a fifth of everything that
+matters. There is no threshold at which this can be switched on.
+
+## Why, and what is actually true
+
+The signal is not missing from the *target*. Against behaviour, 36% of covered
+lines have leverage <= 0.15 and 21% are under 0.05 — in real stdlib code, a
+third of executed lines barely move the output under a realistic input
+distribution. There is plenty to find.
+
+What is missing is the *predictor*. Whether `<` versus `<=` is observable, or
+whether an accumulator is read before it is overwritten, depends on semantics
+and on the input distribution. Dependence topology does not encode either, and
+fourteen different ways of measuring that topology — spectral, flow, reliability,
+category-theoretic — all land in the same place because they are all reading the
+same graph. This is not an implementation failure in any of the fourteen.
+
+The reader-facing target has the opposite problem: only 6% of labelled lines
+score <= 3. Well-written code has little redundancy, so there is almost nothing
+to separate, and a positional null model captures most of what remains.
+
+Two things that did work and should be kept:
+
+- **Inert detection.** Denylisted-call chains — code that exists only to feed
+  logging — is found reliably, and it is a rule, not one of the fourteen.
+- **The oracle itself.** `mutation_oracle.py` measures the behavioural quantity
+  directly and correctly. It costs minutes per function rather than microseconds,
+  but it is the only thing here that answers the behavioural question at all.
