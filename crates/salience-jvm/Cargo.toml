@@ -1,0 +1,19 @@
+[package]
+name = "salience-jvm"
+version = "0.1.0"
+description = "JVM bytecode frontend for salience-core"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+salience-core = { workspace = true }
+mokapot = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
