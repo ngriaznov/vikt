@@ -328,3 +328,50 @@ Two things that did work and should be kept:
 - **The oracle itself.** `mutation_oracle.py` measures the behavioural quantity
   directly and correctly. It costs minutes per function rather than microseconds,
   but it is the only thing here that answers the behavioural question at all.
+
+---
+
+# Addendum 2: the objective, corrected — approximate the rater's judgement
+
+The project's target is now explicit: an algorithm whose output is close to the
+expert rater's judgement. That dissolves the circularity objection this document
+kept raising (the labels are the specification, not a proxy), retires the
+mutation oracle as the primary target, and fixes the comparison technique:
+**held-out prediction**. Fit on some functions, predict a function the fitter
+has never seen, score agreement there. Leave-one-function-out, with the
+regulariser chosen by an inner loop that never sees the held-out function.
+`eval/judgement.py`; labels extended blind to 16 functions / 435 lines
+(`ground-truth-v3.json`).
+
+## Result
+
+| predictor | held-out Spearman vs judgement |
+|---|---|
+| **all 14 signals + structure, combined (ridge)** | **0.451** — beats the best single signal on 12/16 functions |
+| position null | 0.359 |
+| schur (best single algorithm) | 0.341 |
+| current (incumbent) | 0.312 |
+| graph signals only, no position | 0.272 |
+
+Three readings, all of which matter:
+
+1. **No single algorithm approximates judgement — a combination does.** The
+   cross-discipline search was treated as a tournament with one winner; it
+   should have been treated as instrument-building. Judgement is multi-factor,
+   and fourteen weak structural instruments jointly predict it better
+   out-of-sample than any one of them, on functions the fit has never seen.
+
+2. **The fitted weights name the fields that earn their place:** position
+   (0.30), schur — Schur-complement deletion sensitivity (0.23), the incumbent's
+   feature bundle (0.13), then dirichlet and pivot (~0.09 each). Half the
+   fourteen contribute nothing and can be dropped from the search going forward.
+
+3. **Position is signal, not contamination.** Under the judgement objective the
+   positional component of importance (conclusions outrank preamble) is part of
+   the thing being approximated. Graph signals alone reach 0.272; position
+   alone 0.359; together 0.451. They are complementary, not redundant.
+
+Ceiling not reached: 0.451 with a linear model over rank features. The gap
+between that and rater self-consistency is the open territory, and it is now
+measurable per candidate: any proposed algorithm slots into `judgement.py` as a
+feature column and reports its held-out contribution within the hour.
