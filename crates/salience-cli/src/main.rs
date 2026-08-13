@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
 use salience_core::ir::FunctionIr;
-use salience_core::{Denylist, ScoreWeights, Sidecar, analyze};
+use salience_core::{Denylist, ScoreWeights, Scorer, Sidecar, analyze_with_scorer};
 
 /// Output shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -69,6 +69,43 @@ struct Args {
     /// Interpreter to use when lowering Python.
     #[arg(long, default_value = "python3")]
     python: String,
+
+    /// Which algorithm produces the continuous per-line score. Tier
+    /// assignment is unaffected by this choice.
+    #[arg(long, value_enum, default_value_t = ScorerArg::Panel)]
+    scorer: ScorerArg,
+}
+
+/// CLI surface of [`Scorer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ScorerArg {
+    /// The fitted five-instrument combination - the shipped default. Held-out
+    /// Spearman 0.517 against blind expert labels; see salience-core's
+    /// `panel` module for provenance.
+    Panel,
+    /// The incumbent hand-tuned blend, alone.
+    Current,
+    /// Schur-complement deletion sensitivity, alone.
+    Schur,
+    /// Birnbaum structural importance, alone.
+    Pivot,
+    /// Trophic-level derivation depth, alone.
+    Trophic,
+    /// Horton-Strahler confluence order, alone.
+    Strahler,
+}
+
+impl From<ScorerArg> for Scorer {
+    fn from(a: ScorerArg) -> Self {
+        match a {
+            ScorerArg::Panel => Scorer::Panel,
+            ScorerArg::Current => Scorer::Current,
+            ScorerArg::Schur => Scorer::Schur,
+            ScorerArg::Pivot => Scorer::Pivot,
+            ScorerArg::Trophic => Scorer::Trophic,
+            ScorerArg::Strahler => Scorer::Strahler,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -149,7 +186,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         if ir.is_empty() {
             continue;
         }
-        let sal = analyze(ir, &denylist, &weights);
+        let sal = analyze_with_scorer(ir, &denylist, &weights, args.scorer.into());
         sidecar.push(ir, &sal);
         analyzed += 1;
     }

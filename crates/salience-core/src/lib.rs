@@ -82,12 +82,17 @@
 pub mod artifact;
 pub mod graph;
 pub mod ir;
+pub mod panel;
+pub mod pivot;
 pub mod salience;
+pub mod schur;
+pub mod strahler;
+pub mod trophic;
 
 pub use artifact::{Sidecar, SpanRecord};
 pub use graph::Graph;
 pub use ir::{FunctionId, FunctionIr, IrError, Node, NodeKind};
 pub use salience::{
-    Denylist, FunctionSalience, LineSpan, NodeSalience, Reason, ScoreWeights, Tier, analyze,
-    project_to_lines,
+    Denylist, FunctionSalience, LineSpan, NodeSalience, Reason, ScoreWeights, Scorer, Tier,
+    analyze, analyze_with_scorer, project_to_lines,
 };

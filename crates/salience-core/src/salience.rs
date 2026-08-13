@@ -846,3 +846,63 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
     }
     spans
 }
+
+/// Which algorithm produces the continuous per-node `score`.
+///
+/// Tier assignment is never affected: tiers are computed once, by [`analyze`],
+/// before the scorer is consulted. Only [`NodeSalience::score`] differs.
+///
+/// [`Scorer::Panel`] is the shipped strategy — see [`crate::panel`] for why a
+/// combination, the provenance of its weights, and the held-out evidence. The
+/// single-instrument variants exist so the panel's members stay individually
+/// inspectable and re-measurable; they are instruments, not products.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Scorer {
+    /// The incumbent weighted blend — [`score_of`]. What plain [`analyze`]
+    /// computes.
+    Current,
+    /// Schur-complement deletion sensitivity — [`crate::schur`].
+    Schur,
+    /// Birnbaum structural importance — [`crate::pivot`].
+    Pivot,
+    /// Trophic-level derivation depth — [`crate::trophic`].
+    Trophic,
+    /// Horton–Strahler confluence order — [`crate::strahler`].
+    Strahler,
+    /// The fitted five-instrument combination — [`crate::panel`]. The default.
+    #[default]
+    Panel,
+}
+
+/// Runs tiering exactly as [`analyze`] does, then replaces the score with the
+/// chosen [`Scorer`]'s output.
+///
+/// An `Inert`-tier node's score is floored to `0.0` regardless of scorer,
+/// preserving `current`'s contract that inert means zero: a statement whose
+/// only purpose is feeding logging does not become interesting because it
+/// sits at a confluence.
+#[must_use]
+pub fn analyze_with_scorer(
+    ir: &FunctionIr,
+    denylist: &Denylist,
+    weights: &ScoreWeights,
+    scorer: Scorer,
+) -> FunctionSalience {
+    let mut sal = analyze(ir, denylist, weights);
+    let replacement = match scorer {
+        Scorer::Current => None,
+        Scorer::Schur => Some(crate::schur::score(ir, &sal.graph, denylist)),
+        Scorer::Pivot => Some(crate::pivot::rescale_for_display(
+            &crate::pivot::birnbaum_scores(ir, &sal.graph),
+        )),
+        Scorer::Trophic => Some(crate::trophic::score(&sal.graph)),
+        Scorer::Strahler => Some(crate::strahler::score(&sal.graph)),
+        Scorer::Panel => Some(crate::panel::score(ir, &sal, denylist)),
+    };
+    if let Some(scores) = replacement {
+        for (ns, s) in sal.nodes.iter_mut().zip(scores) {
+            ns.score = if ns.tier == Tier::Inert { 0.0 } else { s };
+        }
+    }
+    sal
+}

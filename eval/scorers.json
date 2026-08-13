@@ -1,9 +1,15 @@
 [
  {
+  "name": "panel",
+  "field": "fitted five-instrument combination",
+  "binary": "/workspace/weightloss/target/release/salience",
+  "flag": "--format json --scorer panel"
+ },
+ {
   "name": "current",
   "field": "incumbent, hand-tuned weighted sum",
   "binary": "/workspace/weightloss/target/release/salience",
-  "flag": "--format json"
+  "flag": "--format json --scorer current"
  },
  {
   "name": "magnitude",

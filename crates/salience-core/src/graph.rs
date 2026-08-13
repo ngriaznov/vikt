@@ -221,7 +221,10 @@ impl Graph {
 
 /// Forward dependence edges: who consumes what this node produces, and who is
 /// controlled by it.
-fn dependence_successors(
+/// `pub(crate)` rather than private: the `pivot` scorer needs the same edge
+/// set the incumbent's cones are built from; sharing this function keeps the
+/// two scorers honestly comparable.
+pub(crate) fn dependence_successors(
     n: usize,
     defs: &[DefSite],
     defs_at: &[Vec<DefId>],
@@ -311,7 +314,11 @@ fn cone_sizes(n: usize, succ: &[Vec<NodeId>]) -> Vec<u32> {
 
 /// Iterative Tarjan. Returns each node's component id and the members of each
 /// component, with components emitted in reverse topological order.
-fn strongly_connected(n: usize, succ: &[Vec<NodeId>]) -> (Vec<usize>, Vec<Vec<NodeId>>) {
+///
+/// `pub(crate)` rather than private: the schur, trophic and strahler scorers
+/// reuse it verbatim over their own (differently-indexed) dependence graphs
+/// rather than re-deriving Tarjan's algorithm three more times.
+pub(crate) fn strongly_connected(n: usize, succ: &[Vec<NodeId>]) -> (Vec<usize>, Vec<Vec<NodeId>>) {
     const UNVISITED: usize = usize::MAX;
     let mut index = vec![UNVISITED; n];
     let mut low = vec![0usize; n];
