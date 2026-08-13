@@ -11,6 +11,7 @@ repository = "https://github.com/ngriaznov/weightloss"
 [workspace.dependencies]
 salience-core = { path = "crates/salience-core" }
 salience-jvm = { path = "crates/salience-jvm" }
+salience-js = { path = "crates/salience-js" }
 salience-py = { path = "crates/salience-py" }
 
 serde = { version = "1", features = ["derive"] }

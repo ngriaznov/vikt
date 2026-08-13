@@ -130,6 +130,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_lines)] // one match arm per substrate; splitting hides the shape
 fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let mut denylist = if args.no_denylist {
         Denylist::empty()
@@ -174,9 +175,13 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let lowered = salience_py::lower_file_with(&args.input, &args.python)?;
             ("salience-py/dis".to_owned(), lowered.functions, None)
         }
+        "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => {
+            let lowered = salience_js::lower_file(&args.input)?;
+            ("salience-js/oxc".to_owned(), lowered.functions, None)
+        }
         other => {
             return Err(
-                format!("unsupported input type {other:?}: expected a .class or .py file").into(),
+                format!("unsupported input type {other:?}: expected a .class, .py, .js or .ts file").into(),
             );
         }
     };

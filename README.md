@@ -334,9 +334,18 @@ Implement one function: substrate → `Vec<FunctionIr>`.
 | Java | JVM bytecode via `mokapot` | `LineNumberTable`, needs `javac -g` | **working** |
 | Kotlin | same | `LineNumberTable` **plus** JSR-45 SMAP resolution | **working** — see below |
 | Python | CPython bytecode via `dis` | PEP 626 `co_lines()`, exact | **working** |
+| JS/TS | oxc semantic-resolved AST + constructed CFG | AST spans, exact | **working** — see `salience-js` |
 | Rust | MIR via `rustc_public` | MIR spans | blocked: nightly-only |
 | C/C++/Swift | LLVM IR `DILocation` | debug info | not attempted |
-| JS/TS | no standard IR; Google's JSIR is the exception | source maps | weak |
+
+JS/TS is the one place the IR-over-AST rule bends, deliberately: there is no
+stable JavaScript bytecode to lower from, and no compiler reshapes control
+flow between the source and what runs — so a semantic-resolved AST (oxc) with
+an explicitly built CFG *is* the faithful substrate. The frontend extracts
+every call as its own node, which is what lets the denylist isolate
+`console.log` chains exactly as the bytecode frontends do; `catch` bodies are
+lowered unreachable, mirroring the measured exception-edge decision from the
+Python frontend.
 
 ## Kotlin: the measurement that changed the design
 

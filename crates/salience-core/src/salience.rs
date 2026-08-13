@@ -196,6 +196,17 @@ impl Denylist {
         "log.warning",
         "log.error",
         "print",
+        // JavaScript / TypeScript
+        "console.log",
+        "console.debug",
+        "console.info",
+        "console.warn",
+        "console.error",
+        "console.trace",
+        "console.table",
+        "console.group",
+        "console.time",
+        "console.timeend",
     ];
 
     /// The default denylist.
@@ -809,7 +820,7 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
     for (line, (tier, score, mut reasons)) in per_line {
         // Stable sort by descending tier keeps ties in discovery order, so the
         // output stays reproducible.
-        reasons.sort_by(|a, b| b.0.cmp(&a.0));
+        reasons.sort_by_key(|r| std::cmp::Reverse(r.0));
         let reasons: Vec<String> = reasons.into_iter().map(|(_, t)| t).collect();
         match spans.last_mut() {
             Some(last)

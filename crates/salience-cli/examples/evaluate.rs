@@ -254,7 +254,7 @@ fn walk(root: &Path, ext: &str) -> Vec<PathBuf> {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let mode = args.next().expect("usage: evaluate <jvm|py> <dir>");
+    let mode = args.next().expect("usage: evaluate <jvm|py|js> <dir>");
     let root = PathBuf::from(args.next().expect("usage: evaluate <jvm|py> <dir>"));
     let limit: usize = args
         .next()
@@ -289,6 +289,28 @@ fn main() {
                     }
                     Ok(Ok(c)) => {
                         for ir in &c.functions {
+                            stats.record(ir);
+                        }
+                    }
+                }
+            }
+        }
+        "js" => {
+            for path in walk(&root, "js")
+                .into_iter()
+                .chain(walk(&root, "ts"))
+                .take(limit)
+            {
+                stats.files_seen += 1;
+                match salience_js::lower_file(&path) {
+                    Err(e) => {
+                        stats.files_failed += 1;
+                        let msg = e.to_string();
+                        let short = msg.lines().next().unwrap_or("?").to_owned();
+                        *stats.failures.entry(short).or_default() += 1;
+                    }
+                    Ok(m) => {
+                        for ir in &m.functions {
                             stats.record(ir);
                         }
                     }
