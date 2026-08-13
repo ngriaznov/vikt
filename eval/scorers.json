@@ -106,5 +106,11 @@
   "field": "geomorphology (Horton-Strahler)",
   "binary": "/workspace/wt-strahler/target/release/salience",
   "flag": "--format json --scorer strahler"
+ },
+ {
+  "name": "disrupt",
+  "field": "science of science (CD index)",
+  "binary": "/workspace/wt-disrupt/target/release/salience",
+  "flag": "--format json --scorer disrupt"
  }
 ]

@@ -419,3 +419,28 @@ Two findings worth recording:
   component of judgement (0.84 on get_close_matches, 0.70 on normpath,
   0.61 on quantiles - all functions whose importance rises toward the end).
   Position's weight dropped from 0.30 to 0.24 with trophic present.
+
+## Round two, concluded
+
+disrupt returned from rework genuine (statement-level condensation; 14-24
+distinct values, honest structural limitation documented: CD's sign cannot flip
+without a consumer co-reading the alias source, which stack bytecode rarely
+exhibits). Solo against the oracle it is anti-correlated: -0.146, backwards on
+13/16 functions. The ensemble grants it +0.078 weight but the held-out number
+does not move (0.504 vs 0.506). Verdict: measured, pushed, not pinned.
+
+Final measurement of the round - pruning to only the instruments that earn
+weight:
+
+  panel                                        held-out vs oracle
+  lean: current+schur+pivot+trophic+strahler        0.518   <- best
+  all 18 signals                                    0.506
+  all 19 (with disrupt)                             0.504
+  14 signals (round one)                            0.451
+  position null                                     0.359
+
+The instrument panel is now: POSITION (via trophic where structure permits),
+SCHUR (deletion sensitivity), CURRENT (the incumbent's blend), PIVOT
+(Birnbaum reliability), TROPHIC (derivation depth), STRAHLER (confluence
+order). Six instruments from five fields, held-out 0.518 against the oracle,
++0.16 over the best positional heuristic and +0.18 over any single algorithm.
