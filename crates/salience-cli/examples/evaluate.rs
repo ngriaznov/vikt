@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use salience_core::ir::FunctionIr;
-use salience_core::{Denylist, ScoreWeights, Sidecar, analyze};
+use salience_core::{Denylist, ScoreWeights, Scorer, Sidecar, analyze_with_scorer};
 
 #[derive(Default)]
 struct Stats {
@@ -76,7 +76,13 @@ impl Stats {
         self.sizes.push(ir.len());
 
         let started = Instant::now();
-        let sal = analyze(ir, &Denylist::new(), &ScoreWeights::default());
+        // SALIENCE_SCORER=current measures the incumbent alone; default is the
+        // shipped panel, so the numbers reported are the numbers users get.
+        let scorer = match std::env::var("SALIENCE_SCORER").as_deref() {
+            Ok("current") => Scorer::Current,
+            _ => Scorer::Panel,
+        };
+        let sal = analyze_with_scorer(ir, &Denylist::new(), &ScoreWeights::default(), scorer);
         let elapsed = started.elapsed();
         self.analysis_time += elapsed;
         self.times_ns.push(elapsed.as_nanos());
