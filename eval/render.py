@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 import json, subprocess, sys
 BLOCKS=" ▁▂▃▄▅▆▇█"
-binary, path, fname = sys.argv[1], sys.argv[2], sys.argv[3]
-top = int(sys.argv[4]) if len(sys.argv)>4 else 0
+# usage: render.py <binary> <input> <function> [topN] [--src source-file]
+# --src is required for bytecode inputs, where the analyzed file is not the
+# text to display.
+args = sys.argv[1:]
+src_path = None
+if "--src" in args:
+    i = args.index("--src"); src_path = args[i+1]; del args[i:i+2]
+binary, path, fname = args[0], args[1], args[2]
+top = int(args[3]) if len(args) > 3 else 0
 out=subprocess.run([binary,path,'--format','json'],capture_output=True).stdout
 d=json.loads(out)
-src=open(path).read().splitlines()
+src=open(src_path or path).read().splitlines()
 for f in d['functions']:
     if f['name']!=fname: continue
     rows=[]
