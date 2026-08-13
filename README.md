@@ -47,10 +47,162 @@ Alongside the tier, every span carries two numbers:
   most-important line; painting it against the global scale would render the
   whole body one flat colour.
 
-The score is composed from five continuous or near-continuous terms — forward
-dependence cone, backward dependence cone, effect kind, control-dominance mass,
-and loop depth. The two cones are what give it resolution: they range over the
-width of the function rather than over a handful of buckets.
+The score is produced by an **instrument panel** — five independent algorithms
+combined by weights fitted against blind expert judgement — described in the
+next two sections. Every panel member is also selectable alone via `--scorer`,
+because a combination whose members cannot be inspected individually cannot be
+re-measured honestly.
+
+## The score: an instrument panel
+
+No single structural measure of a dependence graph orders a function's lines
+the way an expert reader does. That is a measured result, not a stance: we
+implemented nineteen algorithms from nineteen fields (full roster below),
+compared each against per-line importance labels written blind by an expert
+rater before any scorer ran, and the best solo instrument reached Spearman
+ρ ≈ 0.36 — statistically indistinguishable from the null heuristic "later
+lines matter more" (0.359). Every algorithm, including the best, also has
+functions it ranks *backwards*.
+
+But they fail in **different places**. Deletion-sensitivity understands
+duplicated structure that flow measures double-count; confluence order is
+robust exactly where reliability analysis is noisy; derivation depth explains
+the functions whose importance accumulates toward the end. Importance is not
+one quantity — it has facets — so the shipped score is a linear combination of
+five instruments plus two structural facts, with ridge weights fitted on the
+expert labels (16 stdlib functions, 425 lines; λ chosen by inner
+cross-validation). Held out on functions the fit never saw: **ρ = 0.517**,
+beating every single instrument on 12 of 16 functions.
+
+| instrument | home field | the facet it carries | weight |
+|---|---|---|---|
+| `current` | this repo's incumbent | dependence cones, control mass, loop carriage | +0.16 |
+| `schur` | linear algebra | what is lost if this statement is deleted | +0.17 |
+| `pivot` | reliability engineering | is this a single point of failure | +0.19 |
+| `trophic` | food-web ecology | how many derivation layers lie beneath | +0.11 |
+| `strahler` | geomorphology | do independent derivations converge here | +0.11 |
+| position | (structural fact) | judgement's demonstrated positional lean | +0.25 |
+| boundary tier | (structural fact) | the tier layer's I/O call | −0.05 |
+
+Mechanics (all in `salience-core/src/panel.rs`, pure Rust like everything
+else): each instrument's per-node scores are projected to lines by `max`,
+rank-normalised within the function — a scorer's *scale* is arbitrary across
+functions, its *ordering* is the signal — then combined by the fitted weights.
+The weights are baked constants with their provenance in the module docs, and
+a test fails if anyone edits one without re-fitting: the held-out number is
+only true of exactly those values. Tier assignment never varies with scorer
+choice; only the continuous score does.
+
+## The search: nineteen algorithms, nineteen fields
+
+The selection principle was symmetry across systems. Mature sciences have
+spent decades formalising "which element of this network matters" — for
+metabolisms, power grids, food webs, citation graphs, river basins, social
+networks — and a function's dependence graph is a small directed network with
+sources (parameters, constants), internal transformation, and sinks (returns,
+writes, calls). Each candidate was chosen because it is *the* importance
+notion of its home field, and transplanted by mapping its home network onto
+the dependence graph. Every one was implemented in Rust on its own branch
+(`claude/scorer-*`), verified deterministic and genuinely different from the
+incumbent, then measured against the blind labels — solo, and by its marginal
+contribution to the fitted combination on held-out functions.
+
+**Panel members** (why they earned a seat):
+
+- **`schur` — Schur-complement deletion sensitivity** (linear algebra /
+  network zeta). Deleting row and column *v* from the influence system gives,
+  in closed form, exactly how much total delivered influence disappears — "what
+  breaks if this line is removed", answered exactly rather than by proxy. Best
+  all-rounder of round one (solo 0.34); its signature win is `bisect_right`
+  (ρ = 0.89 where every flow-style scorer goes negative), because deletion
+  sensitivity is immune to the double-counting that near-duplicate code paths
+  induce in flow measures.
+- **`pivot` — Birnbaum structural importance** (reliability engineering).
+  Treat the graph as a coherent system: how often is this component the pivot
+  between "system delivers" and "system fails"? Equals the Banzhaf voting
+  index. Modest solo (0.13) but stable positive weight in every fit — it sees
+  single-points-of-failure that cone sizes miss.
+- **`trophic` — trophic levels** (food-web ecology). Basal species eat
+  nothing; a predator's level is one plus the mean level of what it eats.
+  Transplanted: parameters and constants are basal, and a statement's level is
+  its derivation depth. Chosen deliberately as a graph-native replacement for
+  the positional null after measurement showed judgement has a real positional
+  component; it wins precisely on the functions where position wins
+  (`get_close_matches` 0.84, `quantiles` 0.61) and displaced a quarter of raw
+  position's fitted weight.
+- **`strahler` — Horton–Strahler stream order** (geomorphology). Springs are
+  order 1; only when two streams of *equal* order meet does the order rise, so
+  high order marks the mainstem of the basin. Transplanted: dataflow is the
+  river, and the mainstem is where independent derivations converge. Best solo
+  instrument of the entire search (0.357) and the most robust — one backwards
+  function out of sixteen, where every other algorithm has two or more. Its
+  virtue is what it ignores: it does not care how *much* flows, only where
+  independent tributaries join.
+- **`current` — the incumbent** described throughout this README: dependence
+  cones, control-dominance mass, loop depth, effect kind. Kept because it
+  covers short imperative loop kernels (`_siftdown` 0.73) where every imported
+  algorithm stumbles.
+
+**Measured and cut** (each was implemented completely, verified, and lost on
+the same labels — the branches remain for re-measurement):
+
+- **`flux` — flux balance analysis** (systems biology). Metabolic networks
+  route mass from nutrients to biomass; transplant values flowing from
+  parameters to effects. Chosen for the strongest source-to-sink analogy of
+  round one. Cut: FBA answers a *categorical* question (essential / variable /
+  blocked) — three score values cannot rank a function.
+- **`mincut` — max-flow/min-cut necessity** (combinatorial optimisation). Is
+  this node on every minimum cut between inputs and outputs? Cut: same
+  categorical failure; and bottleneck-ness turned out anti-correlated with
+  judgement on validation-heavy code.
+- **`observ` — structural controllability** (control theory, Liu–Slotine–
+  Barabási). Driver/critical nodes of a network. Decent solo (0.27) but fully
+  redundant with the panel — zero marginal held-out contribution.
+- **`vitality` — resolvent perturbation / T-matrix** (mathematical physics).
+  How much the graph's Green's function changes when a node is perturbed.
+  Middling solo, negative fitted weight — schur carries the same facet better.
+- **`absorb` — absorbing Markov chains** (probability). Expected visits before
+  absorption at an effect. The only scorer positive on all three round-one
+  targets, but its facet is subsumed by pivot + schur in combination.
+- **`leak` — quantitative information flow** (security). Channel capacity from
+  a statement to observable outputs. Promising on paper; degenerate gradient on
+  a fifth of real functions.
+- **`current-flow` — current-flow betweenness** (physics of resistor
+  networks). Random-walk betweenness; was briefly pinned, but its fitted
+  weight went *negative* once strahler arrived — same facet, noisier.
+- **`dirichlet` — Dirichlet forms / effective resistance** (potential
+  theory). Energy of the harmonic extension. Fine gradient, no judgement
+  signal (solo 0.06).
+- **`leverage` — statistical leverage scores** (statistics / randomised
+  linear algebra). Row leverage of the dependence matrix. Won one axis in
+  early rounds (behavioural leverage), never the judgement axis.
+- **`magnitude` — Leinster magnitude** (enriched category theory). The
+  "effective number of points" of a metric space. Second place on one early
+  target — and flat (single-valued) on 20% of real functions, which is
+  disqualifying for a heatmap.
+- **`hankel` — Hankel singular values** (control theory, model reduction).
+  How much state does this node carry between past and future. Strong on
+  contrived fixtures, weak on real code.
+- **`rarity` — TF-IDF self-information** (information retrieval). The rare
+  operation among routine moves is the formula line. Solo 0.03: statistical
+  surprise is only occasionally importance.
+- **`broker` — Burt's structural holes** (sociology). Low-constraint nodes
+  bridge otherwise-disconnected clusters. Real signal on parser-shaped
+  functions (`urlsplit` 0.60), not enough overall (0.16).
+- **`disrupt` — the CD/disruption index** (science of science). Does later
+  work cite this paper *without* citing its references? The most instructive
+  failure: solo **−0.15**, ranking backwards on 13 of 16 functions. The
+  citation analogy assumes consumers can cite several generations at once;
+  stack-machine dataflow consumes each value exactly once, so the pattern the
+  index needs almost never occurs. A reminder that the transplant, not the
+  theorem, is what has to survive.
+
+The measurement protocol, the labels, and the fitting scripts live in
+`eval/` — `ground-truth-v3.json` (the blind labels), `judgement.py` (the fit
+and the held-out evaluation), `panel.py` (a Python reference of the panel that
+the Rust implementation is acceptance-tested against, ρ ≥ 0.996), and
+`RESULTS-leading-algorithms.md` (the full history, including the dead ends
+and the corrections).
 
 ## Calibration
 
@@ -280,13 +432,19 @@ coverage of the plumbing, not of the mapping.
 ```bash
 cargo build --release
 
-salience Foo.class                          # JSON sidecar on stdout
+salience Foo.class                          # JSON sidecar, panel score (default)
 salience foo.py --format text               # one line per span
 salience Foo.class --annotate Foo.java      # tiered source view
 salience Foo.class --stats                  # histogram and timing
 salience Foo.class --inert 'com.acme.Audit' # extend the denylist
 salience Foo.class --no-denylist            # treat nothing as inert
+salience foo.py --scorer strahler           # one instrument alone
+salience foo.py --scorer current            # the incumbent alone
 ```
+
+`--scorer` selects which algorithm produces the continuous score: `panel`
+(default), or any single instrument — `current`, `schur`, `pivot`, `trophic`,
+`strahler`. Tier assignment is identical under every choice.
 
 Try it:
 
