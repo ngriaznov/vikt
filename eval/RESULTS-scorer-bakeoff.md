@@ -114,3 +114,82 @@ and nothing on control-shaped code.
 - The `yield` bug depresses all four; re-run after fixing it.
 - `flux` is FBA-inspired rather than true FBA, and `observ` may have approximated
   the edge classification — read each branch's own report before quoting.
+
+---
+
+# CORRECTION and second round (systems analysis)
+
+## The comparison was underpowered. I reported it as though it were not.
+
+I wrote "all three lost" above. That was overconfident. Computing 95% confidence
+intervals on the Spearman values — Fisher z, SE = 1/sqrt(n-3) — over all 81
+labelled lines pooled:
+
+| scorer | ρ | 95% CI |
+|---|---|---|
+| current | 0.360 | [0.154, 0.537] |
+| observ | 0.269 | [0.054, 0.460] |
+| pivot | 0.199 | [−0.020, 0.400] |
+| mincut | 0.173 | [−0.047, 0.377] |
+| flux | 0.141 | [−0.080, 0.349] |
+| hankel | 0.131 | [−0.090, 0.340] |
+
+**Every interval overlaps the incumbent's.** Per function it is worse — at n=13
+the CI is roughly ±0.55. The correct statement is not "the imported algorithms
+lost". It is: *none of them measurably beat the incumbent, and this study cannot
+detect differences of the size observed.* 81 lines across three functions is not
+enough to separate ρ=0.36 from ρ=0.20.
+
+## A confound that makes the point estimates worse than they look
+
+I built the incumbent's feature set, and I am the sole rater of the ground truth.
+The incumbent scores lines using influence, control mass and loop-carriage
+because those are what I believe matter; the labels say those lines matter
+because that is what I believe. Some of the incumbent's apparent lead is
+tautological, and no amount of extra labelling *by me* fixes it.
+
+This is the strongest argument yet for mutation testing as the oracle: it is the
+only proposal on the table that does not run through my judgement.
+
+## What IS validly measured: resolution
+
+Score resolution involves no rater, so those numbers stand.
+
+| scorer | distinct values | median distinct/fn | p90/fn | p10 spread |
+|---|---|---|---|---|
+| **pivot** | **100** | 8 | 18 | **0.44** |
+| **hankel** | **98** | 6 | 10 | **0.90** |
+| current | 63 | 8 | 19 | 0.13 |
+| observ | 22 | 4 | 6 | 0.20 |
+| flux | 16 | 3 | 3 | 0.50 |
+| mincut | 14 | 2 | 3 | 0.26 |
+
+**The systems-analysis round delivered what the first round did not.** `pivot`
+matches the incumbent on median distinct scores per function and beats it on
+total distinct values (100 vs 63) and, importantly, on the 10th-percentile
+spread — 0.44 against 0.13. That last column is the heatmap criterion: it says
+that even the *flattest* function gets a usable gradient under `pivot`, where
+under the incumbent the bottom decile of functions is nearly monochrome.
+
+That is a real result, and it is the one the exercise was commissioned to get.
+
+## Round two, as measured
+
+`hankel` — two-sided expected-visit participation. Forward and reverse absorbing
+Markov chains, scored by the product of expected visit counts from the
+fundamental matrix (I−Q)⁻¹, solved exactly per strongly connected component.
+Loops are handled by construction: a cycle with internal return probability p
+multiplies visits by 1/(1−p).
+
+`pivot` — Birnbaum structural importance at p=½, the probability-free
+specialisation, computed by reverse-mode differentiation of a noisy-OR delivery
+function. Equals the absolute Banzhaf index of the induced simple game.
+
+Both keep `--scorer current` reading exactly 0.327, so the comparisons are valid.
+
+## Standing conclusion
+
+Six algorithms from six fields. On the metric that can be measured, two of them
+beat the incumbent. On the metric that matters more, nothing can be concluded
+until the ground truth is an order of magnitude larger and comes from somewhere
+other than the person who wrote the tool.
