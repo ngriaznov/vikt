@@ -420,9 +420,27 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
     // no useful sink downstream, *and* a denylisted one. Dead code with no
     // logging downstream is plumbing, which is what that tier is for.
     let feeds_denylist = backward_closure(&graph, (0..n).filter(|&i| denylisted[i]));
-    let inert: Vec<bool> = (0..n)
+    let mut inert: Vec<bool> = (0..n)
         .map(|i| denylisted[i] || (!useful[i] && feeds_denylist[i]))
         .collect();
+    // That rule is backward-only, which leaves the *discard* of a denylisted
+    // result behind. `LOG.info(...)` as a statement lowers to the call followed
+    // by a `POP_TOP`: the call is inert, and the pop consumes its value, defines
+    // nothing and reaches no effect - so it landed in plumbing, and because a
+    // line takes the strongest tier on it, it dragged the whole logging line out
+    // of `inert`. Sweep forward once: a node that defines nothing, is not itself
+    // an effect, and reads only values produced by inert nodes belongs to the
+    // same dead statement.
+    for i in 0..n {
+        if inert[i] || !ir.nodes[i].defs.is_empty() || ir.nodes[i].kind.is_effect() {
+            continue;
+        }
+        let sources = &graph.uses_defs[i];
+        if !sources.is_empty() && sources.iter().all(|&d| inert[graph.defs[d].node]) {
+            inert[i] = true;
+        }
+    }
+    let inert = inert;
 
     // --- effects and the backward slice ---------------------------------
     // Distance from the nearest effect, over data and control dependence
@@ -773,8 +791,20 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
         }
     }
 
-    // Merge consecutive lines that agree on tier. Gaps in line numbering break
-    // a run: a blank line between two core statements is not itself core.
+    // Merge consecutive lines that agree on tier *and on score*. Gaps in line
+    // numbering break a run: a blank line between two core statements is not
+    // itself core.
+    //
+    // Merging on tier alone - which this did originally - threw away the whole
+    // point of computing a per-node score. A loop body is normally one unbroken
+    // run of `core`, so `heapq::_siftdown`'s lines 211..216 collapsed into a
+    // single span carrying the `max` of their scores: the loop predicate, the
+    // index arithmetic, the comparison and both writes were all reported at
+    // 0.49. No heatmap finer than the tier partition could be drawn from that,
+    // and any rank correlation measured against per-line labels was measuring a
+    // step function rather than the scorer. Requiring the scores to agree keeps
+    // the compaction where it is real - a run of genuinely identical plumbing
+    // still collapses to one span - and keeps the gradient everywhere else.
     let mut spans: Vec<LineSpan> = Vec::new();
     for (line, (tier, score, mut reasons)) in per_line {
         // Stable sort by descending tier keeps ties in discovery order, so the
@@ -782,9 +812,12 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
         reasons.sort_by(|a, b| b.0.cmp(&a.0));
         let reasons: Vec<String> = reasons.into_iter().map(|(_, t)| t).collect();
         match spans.last_mut() {
-            Some(last) if last.tier == tier && last.end + 1 == line => {
+            Some(last)
+                if last.tier == tier
+                    && last.end + 1 == line
+                    && (last.score - score).abs() < 1e-9 =>
+            {
                 last.end = line;
-                last.score = last.score.max(score);
                 for r in reasons {
                     if !last.reasons.contains(&r) {
                         last.reasons.push(r);

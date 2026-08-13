@@ -1,0 +1,1441 @@
+{
+ "schema": "salience-ground-truth/v2",
+ "rater": "claude-opus-5",
+ "method": "Blind expert labelling, extending v1 from 3 functions to 10. Every function added here was read from source and labelled BEFORE any scorer was run against it, and the file was written to disk before measurement. v1's three functions are carried over unchanged so the two versions are comparable. Functions were chosen to widen the shape of the corpus, not to favour any scorer: v1 was three behaviour-dense functions with almost no plumbing, which gave the tier partition nothing to separate. v2 deliberately includes a thin wrapper (shlex.split), a validation-dominated parse (ipaddress._ip_int_from_string), a flat if-chain with no loop (urllib.parse.urlsplit), a function containing a near-duplicate of itself (bisect.bisect_right), and three functions containing genuine plumbing lines - bound-method bindings and invariant assertions - which are the sharpest test in the corpus.",
+ "importance_scale": "10 = changing this line materially changes what the function does or returns; 5 = supporting work that a reader must follow but that carries no decision; 0 = removable with no behavioural consequence (logging, debug, pure micro-optimisation).",
+ "known_biases": [
+  "Single rater, no inter-rater agreement, and the rater implemented the tool under test.",
+  "Labels are for a *reader's* sense of importance, which is not identical to 'a mutant here would be killed'. Mutation testing would disagree in places, especially on error-handling paths that tests rarely cover.",
+  "Three functions is a small sample. Treat rank correlation from it as directional, not conclusive.",
+  "Python only. JVM lowering could behave differently.",
+  "Still a single rater, and still the person who designed the incumbent scorer's feature set. Extra labelling adds statistical power but does not remove that confound; see eval/mutation_oracle.py for an oracle that does not run through anyone's judgement."
+ ],
+ "primary_metric": "Spearman rank correlation between these importances and each scorer's per-line score, computed per function then averaged. Rank correlation rather than tier agreement, because all three functions are almost entirely behaviour-carrying \u2014 well-written stdlib code genuinely has little plumbing, so a tier partition has little to separate. The useful question is whether a scorer ORDERS lines the way a reader would.",
+ "functions": [
+  {
+   "file": "/usr/lib/python3.11/heapq.py",
+   "name": "_siftup",
+   "character": "tight pure algorithm, no I/O, every line load-bearing",
+   "lines": {
+    "261": {
+     "importance": 7,
+     "tier": "core",
+     "note": "endpos bounds the loop"
+    },
+    "262": {
+     "importance": 5,
+     "tier": "core",
+     "note": "startpos only consumed by the final _siftdown"
+    },
+    "263": {
+     "importance": 8,
+     "tier": "core",
+     "note": "newitem is the value being placed"
+    },
+    "265": {
+     "importance": 7,
+     "tier": "core",
+     "note": "heap index arithmetic, loop induction start"
+    },
+    "266": {
+     "importance": 10,
+     "tier": "core",
+     "note": "loop predicate, governs the whole body"
+    },
+    "268": {
+     "importance": 5,
+     "tier": "core",
+     "note": "index arithmetic feeding the comparison"
+    },
+    "269": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE heap-order comparison; flip it and the invariant breaks"
+    },
+    "270": {
+     "importance": 7,
+     "tier": "core",
+     "note": "selects the smaller child"
+    },
+    "272": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "mutates the caller's list"
+    },
+    "273": {
+     "importance": 8,
+     "tier": "core",
+     "note": "loop-carried induction"
+    },
+    "274": {
+     "importance": 8,
+     "tier": "core",
+     "note": "loop-carried induction"
+    },
+    "277": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "final placement, mutates caller's list"
+    },
+    "278": {
+     "importance": 8,
+     "tier": "boundary",
+     "note": "delegates the rest of the operation"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/csv.py",
+   "name": "has_header",
+   "character": "data-driven heuristic; accumulators, nested loops, type probing, a vote",
+   "lines": {
+    "393": {
+     "importance": 8,
+     "tier": "core",
+     "note": "builds the reader everything flows from"
+    },
+    "395": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the candidate header row, voted on at the end"
+    },
+    "397": {
+     "importance": 7,
+     "tier": "core",
+     "note": "column count, gates the irregular-row check"
+    },
+    "398": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the type accumulator"
+    },
+    "399": {
+     "importance": 6,
+     "tier": "core",
+     "note": "accumulator init"
+    },
+    "401": {
+     "importance": 5,
+     "tier": "core",
+     "note": "sample counter"
+    },
+    "402": {
+     "importance": 9,
+     "tier": "core",
+     "note": "main row loop"
+    },
+    "404": {
+     "importance": 6,
+     "tier": "core",
+     "note": "the 20-row sanity cap, genuinely changes results"
+    },
+    "405": {
+     "importance": 5,
+     "tier": "core",
+     "note": "loop exit"
+    },
+    "406": {
+     "importance": 5,
+     "tier": "core",
+     "note": "loop-carried counter"
+    },
+    "408": {
+     "importance": 7,
+     "tier": "core",
+     "note": "skips ragged rows"
+    },
+    "409": {
+     "importance": 4,
+     "tier": "core",
+     "note": "control only"
+    },
+    "411": {
+     "importance": 8,
+     "tier": "core",
+     "note": "per-column loop"
+    },
+    "412": {
+     "importance": 7,
+     "tier": "core",
+     "note": "the type probe being attempted"
+    },
+    "414": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the actual type test; raising is the signal"
+    },
+    "415": {
+     "importance": 7,
+     "tier": "core",
+     "note": "catches the failed cast"
+    },
+    "417": {
+     "importance": 8,
+     "tier": "core",
+     "note": "fallback to string length"
+    },
+    "419": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the consistency check driving everything"
+    },
+    "420": {
+     "importance": 7,
+     "tier": "core",
+     "note": "first-sighting branch"
+    },
+    "421": {
+     "importance": 8,
+     "tier": "core",
+     "note": "records the column type"
+    },
+    "425": {
+     "importance": 8,
+     "tier": "core",
+     "note": "drops an inconsistent column"
+    },
+    "429": {
+     "importance": 7,
+     "tier": "core",
+     "note": "vote accumulator"
+    },
+    "430": {
+     "importance": 8,
+     "tier": "core",
+     "note": "voting loop"
+    },
+    "431": {
+     "importance": 8,
+     "tier": "core",
+     "note": "length-vs-type branch"
+    },
+    "432": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the length vote test"
+    },
+    "433": {
+     "importance": 8,
+     "tier": "core",
+     "note": "vote up"
+    },
+    "435": {
+     "importance": 8,
+     "tier": "core",
+     "note": "vote down"
+    },
+    "438": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the typecast test"
+    },
+    "439": {
+     "importance": 7,
+     "tier": "core",
+     "note": "catches the failed cast"
+    },
+    "440": {
+     "importance": 8,
+     "tier": "core",
+     "note": "vote up"
+    },
+    "442": {
+     "importance": 8,
+     "tier": "core",
+     "note": "vote down"
+    },
+    "444": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/os.py",
+   "name": "_walk",
+   "character": "I/O heavy generator with error paths, recursion, and one genuine micro-optimisation",
+   "lines": {
+    "346": {
+     "importance": 8,
+     "tier": "core",
+     "note": "accumulator that gets yielded"
+    },
+    "347": {
+     "importance": 8,
+     "tier": "core",
+     "note": "accumulator that gets yielded"
+    },
+    "348": {
+     "importance": 7,
+     "tier": "core",
+     "note": "bottom-up recursion accumulator"
+    },
+    "358": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the directory read; everything depends on it"
+    },
+    "360": {
+     "importance": 5,
+     "tier": "core",
+     "note": "error-callback guard"
+    },
+    "361": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "user callback, an escaping effect"
+    },
+    "362": {
+     "importance": 7,
+     "tier": "boundary",
+     "note": "abandons the directory"
+    },
+    "364": {
+     "importance": 6,
+     "tier": "core",
+     "note": "closes the iterator"
+    },
+    "365": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the entry loop"
+    },
+    "368": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "pulls the next entry"
+    },
+    "370": {
+     "importance": 8,
+     "tier": "core",
+     "note": "normal loop exit"
+    },
+    "372": {
+     "importance": 5,
+     "tier": "core",
+     "note": "error-callback guard"
+    },
+    "373": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "user callback"
+    },
+    "374": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "abandons the directory"
+    },
+    "377": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the dir/file classification, may stat"
+    },
+    "381": {
+     "importance": 6,
+     "tier": "core",
+     "note": "conservative fallback"
+    },
+    "383": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the classification branch"
+    },
+    "384": {
+     "importance": 9,
+     "tier": "core",
+     "note": "accumulates a directory"
+    },
+    "386": {
+     "importance": 9,
+     "tier": "core",
+     "note": "accumulates a file"
+    },
+    "388": {
+     "importance": 7,
+     "tier": "core",
+     "note": "bottom-up mode gate"
+    },
+    "391": {
+     "importance": 6,
+     "tier": "core",
+     "note": "followlinks gate"
+    },
+    "392": {
+     "importance": 5,
+     "tier": "core",
+     "note": "sets the descend flag"
+    },
+    "395": {
+     "importance": 7,
+     "tier": "boundary",
+     "note": "symlink probe, may stat"
+    },
+    "400": {
+     "importance": 4,
+     "tier": "core",
+     "note": "conservative fallback"
+    },
+    "401": {
+     "importance": 6,
+     "tier": "core",
+     "note": "descend decision"
+    },
+    "403": {
+     "importance": 6,
+     "tier": "core",
+     "note": "descend branch"
+    },
+    "404": {
+     "importance": 7,
+     "tier": "core",
+     "note": "queues a subdirectory"
+    },
+    "407": {
+     "importance": 9,
+     "tier": "core",
+     "note": "top-down vs bottom-up; governs the whole tail"
+    },
+    "408": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "THE output"
+    },
+    "411": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "pure micro-optimisation: binds methods to locals. The one line here a reader would call unimportant, and the sharpest test in this corpus."
+    },
+    "412": {
+     "importance": 8,
+     "tier": "core",
+     "note": "recursion loop"
+    },
+    "413": {
+     "importance": 8,
+     "tier": "core",
+     "note": "builds the child path"
+    },
+    "418": {
+     "importance": 8,
+     "tier": "core",
+     "note": "symlink guard on descent"
+    },
+    "419": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "recursive output"
+    },
+    "422": {
+     "importance": 8,
+     "tier": "core",
+     "note": "recursion loop"
+    },
+    "423": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "recursive output"
+    },
+    "425": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "THE output, after children"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/heapq.py",
+   "name": "_siftdown",
+   "character": "tight pure algorithm, mirror image of _siftup",
+   "lines": {
+    "208": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the value being sifted"
+    },
+    "211": {
+     "importance": 10,
+     "tier": "core",
+     "note": "loop predicate, governs the body"
+    },
+    "212": {
+     "importance": 7,
+     "tier": "core",
+     "note": "parent index arithmetic"
+    },
+    "213": {
+     "importance": 7,
+     "tier": "core",
+     "note": "the value compared against"
+    },
+    "214": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE heap-order comparison"
+    },
+    "215": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "mutates the caller's list"
+    },
+    "216": {
+     "importance": 8,
+     "tier": "core",
+     "note": "loop-carried induction"
+    },
+    "217": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "control only; the while predicate already governs"
+    },
+    "218": {
+     "importance": 6,
+     "tier": "core",
+     "note": "the actual loop exit"
+    },
+    "219": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "final placement, mutates the caller's list"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/bisect.py",
+   "name": "bisect_right",
+   "character": "binary search with a duplicated keyed variant, so half the body is a near-clone",
+   "lines": {
+    "30": {
+     "importance": 4,
+     "tier": "core",
+     "note": "argument validation"
+    },
+    "31": {
+     "importance": 4,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "32": {
+     "importance": 5,
+     "tier": "core",
+     "note": "default handling"
+    },
+    "33": {
+     "importance": 6,
+     "tier": "core",
+     "note": "the search upper bound"
+    },
+    "36": {
+     "importance": 5,
+     "tier": "core",
+     "note": "dispatch between two structurally identical loops"
+    },
+    "37": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the binary search loop"
+    },
+    "38": {
+     "importance": 9,
+     "tier": "core",
+     "note": "midpoint; the whole method is this line"
+    },
+    "39": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE comparison; flip it and the postcondition breaks"
+    },
+    "40": {
+     "importance": 9,
+     "tier": "core",
+     "note": "narrows above"
+    },
+    "42": {
+     "importance": 9,
+     "tier": "core",
+     "note": "narrows below; the +1 is what makes it bisect_right"
+    },
+    "44": {
+     "importance": 8,
+     "tier": "core",
+     "note": "keyed variant of the search loop"
+    },
+    "45": {
+     "importance": 8,
+     "tier": "core",
+     "note": "midpoint"
+    },
+    "46": {
+     "importance": 9,
+     "tier": "core",
+     "note": "THE comparison, keyed"
+    },
+    "47": {
+     "importance": 8,
+     "tier": "core",
+     "note": "narrows above"
+    },
+    "49": {
+     "importance": 8,
+     "tier": "core",
+     "note": "narrows below"
+    },
+    "50": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/ipaddress.py",
+   "name": "_ip_int_from_string",
+   "character": "validation-dominated parse: six of eight lines are guards and error paths",
+   "lines": {
+    "1201": {
+     "importance": 5,
+     "tier": "core",
+     "note": "empty guard"
+    },
+    "1202": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "1204": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the split everything else reads"
+    },
+    "1205": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the arity check; genuine validation"
+    },
+    "1206": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "1209": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "THE conversion and the return"
+    },
+    "1210": {
+     "importance": 5,
+     "tier": "core",
+     "note": "catches a bad octet"
+    },
+    "1211": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "error translation; changes the exception type callers see"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/shlex.py",
+   "name": "split",
+   "character": "thin configuring wrapper; almost all plumbing, one line of answer",
+   "lines": {
+    "307": {
+     "importance": 3,
+     "tier": "core",
+     "note": "deprecation guard"
+    },
+    "308": {
+     "importance": 1,
+     "tier": "plumbing",
+     "note": "import for a diagnostic"
+    },
+    "309": {
+     "importance": 2,
+     "tier": "boundary",
+     "note": "diagnostic only; removing it changes no result"
+    },
+    "311": {
+     "importance": 9,
+     "tier": "core",
+     "note": "constructs the lexer everything comes from"
+    },
+    "312": {
+     "importance": 8,
+     "tier": "core",
+     "note": "configuration that materially changes the split"
+    },
+    "313": {
+     "importance": 6,
+     "tier": "core",
+     "note": "comment handling gate"
+    },
+    "314": {
+     "importance": 7,
+     "tier": "core",
+     "note": "configuration that materially changes the split"
+    },
+    "315": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/urllib/parse.py",
+   "name": "urlsplit",
+   "character": "flat sequential parser: no loops to speak of, decisions made by a chain of ifs",
+   "lines": {
+    "491": {
+     "importance": 7,
+     "tier": "core",
+     "note": "bytes/str normalisation; everything below assumes it"
+    },
+    "494": {
+     "importance": 6,
+     "tier": "core",
+     "note": "strips control characters, a spec requirement"
+    },
+    "495": {
+     "importance": 5,
+     "tier": "core",
+     "note": "same for the default scheme"
+    },
+    "497": {
+     "importance": 6,
+     "tier": "core",
+     "note": "unsafe-byte removal loop"
+    },
+    "498": {
+     "importance": 6,
+     "tier": "core",
+     "note": "removes unsafe bytes from the url"
+    },
+    "499": {
+     "importance": 5,
+     "tier": "core",
+     "note": "removes unsafe bytes from the scheme"
+    },
+    "501": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "coerces an argument already used as a truth value"
+    },
+    "502": {
+     "importance": 5,
+     "tier": "core",
+     "note": "the three components that may stay empty"
+    },
+    "503": {
+     "importance": 8,
+     "tier": "core",
+     "note": "locates the scheme separator"
+    },
+    "504": {
+     "importance": 9,
+     "tier": "core",
+     "note": "scheme detection; governs the whole scheme branch"
+    },
+    "505": {
+     "importance": 7,
+     "tier": "core",
+     "note": "validates the scheme characters"
+    },
+    "506": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the character-class test"
+    },
+    "507": {
+     "importance": 6,
+     "tier": "core",
+     "note": "abandons scheme detection"
+    },
+    "509": {
+     "importance": 9,
+     "tier": "core",
+     "note": "splits scheme off the url"
+    },
+    "510": {
+     "importance": 9,
+     "tier": "core",
+     "note": "netloc detection"
+    },
+    "511": {
+     "importance": 9,
+     "tier": "core",
+     "note": "splits the netloc"
+    },
+    "512": {
+     "importance": 6,
+     "tier": "core",
+     "note": "bracket balance check"
+    },
+    "514": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "515": {
+     "importance": 5,
+     "tier": "core",
+     "note": "bracketed-netloc gate"
+    },
+    "516": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "validation call that can raise"
+    },
+    "517": {
+     "importance": 8,
+     "tier": "core",
+     "note": "fragment gate"
+    },
+    "518": {
+     "importance": 8,
+     "tier": "core",
+     "note": "splits the fragment"
+    },
+    "519": {
+     "importance": 8,
+     "tier": "core",
+     "note": "query gate"
+    },
+    "520": {
+     "importance": 8,
+     "tier": "core",
+     "note": "splits the query"
+    },
+    "521": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "validation call that can raise"
+    },
+    "522": {
+     "importance": 9,
+     "tier": "core",
+     "note": "assembles the result"
+    },
+    "523": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/json/decoder.py",
+   "name": "py_scanstring",
+   "character": "hand-written scanner loop with a bound-method micro-optimisation and deep escape handling",
+   "lines": {
+    "79": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the accumulator that becomes the result"
+    },
+    "80": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "pure micro-optimisation: binds a bound method to a local"
+    },
+    "81": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "only ever read by error messages"
+    },
+    "82": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the scan loop"
+    },
+    "83": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE scan; the regex does the work"
+    },
+    "84": {
+     "importance": 6,
+     "tier": "core",
+     "note": "unterminated-string guard"
+    },
+    "85": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "86": {
+     "importance": 9,
+     "tier": "core",
+     "note": "advances the cursor; loop-carried"
+    },
+    "87": {
+     "importance": 9,
+     "tier": "core",
+     "note": "unpacks the match"
+    },
+    "89": {
+     "importance": 7,
+     "tier": "core",
+     "note": "empty-content guard"
+    },
+    "90": {
+     "importance": 9,
+     "tier": "core",
+     "note": "accumulates output"
+    },
+    "93": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the end-of-string test"
+    },
+    "94": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the loop exit"
+    },
+    "95": {
+     "importance": 8,
+     "tier": "core",
+     "note": "escape-vs-control-character branch"
+    },
+    "96": {
+     "importance": 5,
+     "tier": "core",
+     "note": "strict-mode gate"
+    },
+    "98": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "message text only"
+    },
+    "99": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "101": {
+     "importance": 6,
+     "tier": "core",
+     "note": "accumulates a literal control character"
+    },
+    "102": {
+     "importance": 5,
+     "tier": "core",
+     "note": "control only"
+    },
+    "104": {
+     "importance": 9,
+     "tier": "core",
+     "note": "reads the escape character"
+    },
+    "105": {
+     "importance": 5,
+     "tier": "core",
+     "note": "end-of-input guard"
+    },
+    "106": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "109": {
+     "importance": 8,
+     "tier": "core",
+     "note": "unicode-escape branch"
+    },
+    "111": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the escape lookup"
+    },
+    "112": {
+     "importance": 5,
+     "tier": "core",
+     "note": "invalid-escape guard"
+    },
+    "113": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "message text only"
+    },
+    "114": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "escapes as an exception"
+    },
+    "115": {
+     "importance": 8,
+     "tier": "core",
+     "note": "advances the cursor"
+    },
+    "117": {
+     "importance": 9,
+     "tier": "core",
+     "note": "decodes a uXXXX escape"
+    },
+    "118": {
+     "importance": 8,
+     "tier": "core",
+     "note": "advances the cursor"
+    },
+    "119": {
+     "importance": 7,
+     "tier": "core",
+     "note": "high-surrogate test"
+    },
+    "120": {
+     "importance": 7,
+     "tier": "core",
+     "note": "decodes the low surrogate"
+    },
+    "121": {
+     "importance": 7,
+     "tier": "core",
+     "note": "low-surrogate range test"
+    },
+    "122": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the surrogate-pair combination"
+    },
+    "123": {
+     "importance": 7,
+     "tier": "core",
+     "note": "advances the cursor"
+    },
+    "124": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the decoded character"
+    },
+    "125": {
+     "importance": 9,
+     "tier": "core",
+     "note": "accumulates output"
+    },
+    "126": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/fnmatch.py",
+   "name": "translate",
+   "character": "two-pass compiler with assertions, sentinels and two bound-method micro-optimisations",
+   "lines": {
+    "80": {
+     "importance": 6,
+     "tier": "core",
+     "note": "sentinel that the second pass keys on"
+    },
+    "81": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the first-pass accumulator"
+    },
+    "82": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "pure micro-optimisation: binds a bound method to a local"
+    },
+    "83": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor and bound"
+    },
+    "84": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the scan loop"
+    },
+    "85": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the character being dispatched on"
+    },
+    "86": {
+     "importance": 8,
+     "tier": "core",
+     "note": "cursor advance; loop-carried"
+    },
+    "87": {
+     "importance": 9,
+     "tier": "core",
+     "note": "star branch"
+    },
+    "89": {
+     "importance": 5,
+     "tier": "core",
+     "note": "consecutive-star compression"
+    },
+    "90": {
+     "importance": 9,
+     "tier": "core",
+     "note": "emits a star"
+    },
+    "91": {
+     "importance": 8,
+     "tier": "core",
+     "note": "question-mark branch"
+    },
+    "92": {
+     "importance": 8,
+     "tier": "core",
+     "note": "emits any-character"
+    },
+    "93": {
+     "importance": 8,
+     "tier": "core",
+     "note": "character-class branch"
+    },
+    "94": {
+     "importance": 6,
+     "tier": "core",
+     "note": "class scan cursor"
+    },
+    "95": {
+     "importance": 6,
+     "tier": "core",
+     "note": "leading negation"
+    },
+    "96": {
+     "importance": 6,
+     "tier": "core",
+     "note": "skips it"
+    },
+    "97": {
+     "importance": 6,
+     "tier": "core",
+     "note": "leading literal bracket"
+    },
+    "98": {
+     "importance": 6,
+     "tier": "core",
+     "note": "skips it"
+    },
+    "99": {
+     "importance": 8,
+     "tier": "core",
+     "note": "scans to the closing bracket"
+    },
+    "100": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor advance"
+    },
+    "101": {
+     "importance": 7,
+     "tier": "core",
+     "note": "unterminated class"
+    },
+    "102": {
+     "importance": 6,
+     "tier": "core",
+     "note": "emits a literal bracket"
+    },
+    "104": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the class body"
+    },
+    "105": {
+     "importance": 7,
+     "tier": "core",
+     "note": "range-vs-plain branch"
+    },
+    "106": {
+     "importance": 7,
+     "tier": "core",
+     "note": "escapes backslashes"
+    },
+    "108": {
+     "importance": 6,
+     "tier": "core",
+     "note": "range chunk accumulator"
+    },
+    "109": {
+     "importance": 6,
+     "tier": "core",
+     "note": "skips a leading negation"
+    },
+    "110": {
+     "importance": 7,
+     "tier": "core",
+     "note": "range scan loop"
+    },
+    "111": {
+     "importance": 8,
+     "tier": "core",
+     "note": "finds the next hyphen"
+    },
+    "112": {
+     "importance": 7,
+     "tier": "core",
+     "note": "no more ranges"
+    },
+    "113": {
+     "importance": 6,
+     "tier": "core",
+     "note": "loop exit"
+    },
+    "114": {
+     "importance": 7,
+     "tier": "core",
+     "note": "accumulates a chunk"
+    },
+    "115": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor advance"
+    },
+    "116": {
+     "importance": 6,
+     "tier": "core",
+     "note": "skips past the range"
+    },
+    "117": {
+     "importance": 7,
+     "tier": "core",
+     "note": "the trailing chunk"
+    },
+    "118": {
+     "importance": 6,
+     "tier": "core",
+     "note": "empty-tail branch"
+    },
+    "119": {
+     "importance": 7,
+     "tier": "core",
+     "note": "accumulates the tail"
+    },
+    "121": {
+     "importance": 5,
+     "tier": "core",
+     "note": "re-attaches a trailing hyphen"
+    },
+    "123": {
+     "importance": 5,
+     "tier": "core",
+     "note": "empty-range removal loop"
+    },
+    "124": {
+     "importance": 5,
+     "tier": "core",
+     "note": "the overlap test"
+    },
+    "125": {
+     "importance": 5,
+     "tier": "core",
+     "note": "merges two chunks"
+    },
+    "126": {
+     "importance": 5,
+     "tier": "core",
+     "note": "drops the merged chunk"
+    },
+    "129": {
+     "importance": 8,
+     "tier": "core",
+     "note": "rebuilds the class body"
+    },
+    "132": {
+     "importance": 6,
+     "tier": "core",
+     "note": "escapes set operators"
+    },
+    "133": {
+     "importance": 8,
+     "tier": "core",
+     "note": "cursor advance past the class"
+    },
+    "134": {
+     "importance": 5,
+     "tier": "core",
+     "note": "empty-class branch"
+    },
+    "136": {
+     "importance": 5,
+     "tier": "core",
+     "note": "emits never-match"
+    },
+    "137": {
+     "importance": 4,
+     "tier": "core",
+     "note": "negated-empty branch"
+    },
+    "139": {
+     "importance": 4,
+     "tier": "core",
+     "note": "emits any-character"
+    },
+    "141": {
+     "importance": 6,
+     "tier": "core",
+     "note": "negation branch"
+    },
+    "142": {
+     "importance": 6,
+     "tier": "core",
+     "note": "rewrites to a regex negation"
+    },
+    "143": {
+     "importance": 5,
+     "tier": "core",
+     "note": "leading caret or bracket"
+    },
+    "144": {
+     "importance": 5,
+     "tier": "core",
+     "note": "escapes it"
+    },
+    "145": {
+     "importance": 8,
+     "tier": "core",
+     "note": "emits the class"
+    },
+    "147": {
+     "importance": 8,
+     "tier": "core",
+     "note": "emits an escaped literal"
+    },
+    "148": {
+     "importance": 2,
+     "tier": "plumbing",
+     "note": "invariant assertion"
+    },
+    "151": {
+     "importance": 7,
+     "tier": "core",
+     "note": "hands the first pass to the second"
+    },
+    "152": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the second-pass accumulator"
+    },
+    "153": {
+     "importance": 3,
+     "tier": "plumbing",
+     "note": "pure micro-optimisation: binds a bound method to a local"
+    },
+    "154": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor and bound"
+    },
+    "156": {
+     "importance": 7,
+     "tier": "core",
+     "note": "copies the fixed prefix"
+    },
+    "157": {
+     "importance": 8,
+     "tier": "core",
+     "note": "emits it"
+    },
+    "158": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor advance"
+    },
+    "166": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the star-fixed loop"
+    },
+    "167": {
+     "importance": 2,
+     "tier": "plumbing",
+     "note": "invariant assertion"
+    },
+    "168": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor advance"
+    },
+    "169": {
+     "importance": 7,
+     "tier": "core",
+     "note": "trailing-star branch"
+    },
+    "170": {
+     "importance": 8,
+     "tier": "core",
+     "note": "emits a greedy tail"
+    },
+    "171": {
+     "importance": 6,
+     "tier": "core",
+     "note": "loop exit"
+    },
+    "172": {
+     "importance": 2,
+     "tier": "plumbing",
+     "note": "invariant assertion"
+    },
+    "173": {
+     "importance": 7,
+     "tier": "core",
+     "note": "fixed-piece accumulator"
+    },
+    "174": {
+     "importance": 7,
+     "tier": "core",
+     "note": "collects the fixed piece"
+    },
+    "175": {
+     "importance": 7,
+     "tier": "core",
+     "note": "accumulates it"
+    },
+    "176": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cursor advance"
+    },
+    "177": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the fixed piece"
+    },
+    "178": {
+     "importance": 7,
+     "tier": "core",
+     "note": "last-piece branch"
+    },
+    "179": {
+     "importance": 7,
+     "tier": "core",
+     "note": "emits a greedy tail"
+    },
+    "180": {
+     "importance": 7,
+     "tier": "core",
+     "note": "emits the fixed piece"
+    },
+    "182": {
+     "importance": 8,
+     "tier": "core",
+     "note": "THE atomic group; the whole point of the second pass"
+    },
+    "183": {
+     "importance": 2,
+     "tier": "plumbing",
+     "note": "invariant assertion"
+    },
+    "184": {
+     "importance": 9,
+     "tier": "core",
+     "note": "joins the regex"
+    },
+    "185": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  }
+ ]
+}
