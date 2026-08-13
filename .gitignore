@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 demo/kotlin/out/
 demo/**/*.jar
+corpus/
+eval/corpus-logs/

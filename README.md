@@ -479,6 +479,14 @@ salience foo.py --scorer current            # the incumbent alone
 (default), or any single instrument — `current`, `schur`, `pivot`, `trophic`,
 `strahler`. Tier assignment is identical under every choice.
 
+Reproduce the scale run (fetches six production codebases, ~2M instructions,
+and prints the per-corpus summary; see `eval/RESULTS-corpus-scale.md` for the
+measured results):
+
+```bash
+./eval/fetch-corpus.sh && ./eval/run-corpus.sh
+```
+
 Try it:
 
 ```bash
