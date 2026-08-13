@@ -1,0 +1,576 @@
+{
+ "schema": "salience-ground-truth-js/v1",
+ "rater": "claude-opus-5",
+ "method": "Blind expert labelling of JavaScript and TypeScript, mirroring the Python protocol: every function read from source and labelled per line BEFORE any scorer ran on it, file committed before measurement. This is a TRANSFER test: the panel weights were fitted on Python labels only and are applied here unchanged. lodash chunk and debounce were deliberately EXCLUDED as contaminated - their scores had already been rendered during frontend development.",
+ "importance_scale": "10 = changing this line materially changes what the function does or returns; 5 = supporting work a reader must follow but that carries no decision; 0 = removable with no behavioural consequence.",
+ "known_biases": [
+  "Single rater, who also built the tool and wrote these labels after two rounds of Python labelling - style drift toward what the instruments reward cannot be excluded.",
+  "Nine functions across three repos; directional, not conclusive.",
+  "memoize and pick contain closures, which the JS frontend v1 models without capture edges - chosen deliberately to measure that limitation."
+ ],
+ "functions": [
+  {
+   "file": "/workspace/lodash/lodash.js",
+   "name": "baseFlatten",
+   "character": "recursive flatten with policy defaults",
+   "lines": {
+    "2981": {
+     "importance": 4,
+     "tier": "core",
+     "note": "loop index init"
+    },
+    "2982": {
+     "importance": 5,
+     "tier": "core",
+     "note": "bound"
+    },
+    "2984": {
+     "importance": 7,
+     "tier": "core",
+     "note": "default predicate: decides WHAT counts as flattenable"
+    },
+    "2985": {
+     "importance": 6,
+     "tier": "core",
+     "note": "accumulator default"
+    },
+    "2987": {
+     "importance": 9,
+     "tier": "core",
+     "note": "main loop"
+    },
+    "2988": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the element"
+    },
+    "2989": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE flatten decision: depth and predicate"
+    },
+    "2990": {
+     "importance": 8,
+     "tier": "core",
+     "note": "recursion gate"
+    },
+    "2992": {
+     "importance": 10,
+     "tier": "core",
+     "note": "the recursive call"
+    },
+    "2994": {
+     "importance": 9,
+     "tier": "core",
+     "note": "flatten one level"
+    },
+    "2996": {
+     "importance": 7,
+     "tier": "core",
+     "note": "strict-mode passthrough gate"
+    },
+    "2997": {
+     "importance": 8,
+     "tier": "core",
+     "note": "appends unflattened value"
+    },
+    "3000": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/workspace/lodash/lodash.js",
+   "name": "baseSortedIndex",
+   "character": "binary search with numeric fast path",
+   "lines": {
+    "4162": {
+     "importance": 5,
+     "tier": "core",
+     "note": "low bound"
+    },
+    "4163": {
+     "importance": 6,
+     "tier": "core",
+     "note": "high bound with null guard"
+    },
+    "4165": {
+     "importance": 7,
+     "tier": "core",
+     "note": "fast-path guard: numeric, non-NaN, small"
+    },
+    "4166": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the search loop"
+    },
+    "4167": {
+     "importance": 9,
+     "tier": "core",
+     "note": "midpoint"
+    },
+    "4168": {
+     "importance": 8,
+     "tier": "core",
+     "note": "probe"
+    },
+    "4170": {
+     "importance": 9,
+     "tier": "core",
+     "note": "null/symbol guard on the comparison"
+    },
+    "4171": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE comparison; retHighest picks <= vs <"
+    },
+    "4172": {
+     "importance": 9,
+     "tier": "core",
+     "note": "narrow below"
+    },
+    "4174": {
+     "importance": 9,
+     "tier": "core",
+     "note": "narrow above"
+    },
+    "4177": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the answer"
+    },
+    "4179": {
+     "importance": 7,
+     "tier": "boundary",
+     "note": "generic fallback"
+    }
+   }
+  },
+  {
+   "file": "/workspace/lodash/lodash.js",
+   "name": "shuffleSelf",
+   "character": "Fisher-Yates in place",
+   "lines": {
+    "6807": {
+     "importance": 4,
+     "tier": "core",
+     "note": "index init"
+    },
+    "6808": {
+     "importance": 5,
+     "tier": "core",
+     "note": "length"
+    },
+    "6809": {
+     "importance": 6,
+     "tier": "core",
+     "note": "last index"
+    },
+    "6811": {
+     "importance": 6,
+     "tier": "core",
+     "note": "size default"
+    },
+    "6812": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the loop"
+    },
+    "6813": {
+     "importance": 10,
+     "tier": "core",
+     "note": "the random pick range: THE Fisher-Yates invariant"
+    },
+    "6814": {
+     "importance": 8,
+     "tier": "core",
+     "note": "save target"
+    },
+    "6816": {
+     "importance": 9,
+     "tier": "core",
+     "note": "swap half"
+    },
+    "6817": {
+     "importance": 9,
+     "tier": "core",
+     "note": "swap half"
+    },
+    "6819": {
+     "importance": 8,
+     "tier": "boundary",
+     "note": "truncate to size, subtle"
+    },
+    "6820": {
+     "importance": 8,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/workspace/lodash/lodash.js",
+   "name": "memoize",
+   "character": "closure factory with cache policy",
+   "lines": {
+    "10640": {
+     "importance": 6,
+     "tier": "core",
+     "note": "argument validation"
+    },
+    "10641": {
+     "importance": 5,
+     "tier": "boundary",
+     "note": "escapes as exception"
+    },
+    "10643": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the closure that IS the product"
+    },
+    "10644": {
+     "importance": 7,
+     "tier": "core",
+     "note": "captures arguments"
+    },
+    "10645": {
+     "importance": 9,
+     "tier": "core",
+     "note": "cache key policy: resolver or first arg"
+    },
+    "10646": {
+     "importance": 7,
+     "tier": "core",
+     "note": "cache handle"
+    },
+    "10648": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE memoization test"
+    },
+    "10649": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "cache hit return"
+    },
+    "10651": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the real call"
+    },
+    "10652": {
+     "importance": 9,
+     "tier": "core",
+     "note": "cache write; set may replace cache"
+    },
+    "10653": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the answer"
+    },
+    "10655": {
+     "importance": 8,
+     "tier": "core",
+     "note": "cache construction"
+    },
+    "10656": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "returns the closure"
+    }
+   }
+  },
+  {
+   "file": "/workspace/express/lib/utils.js",
+   "name": "acceptParams",
+   "character": "header parameter scanner",
+   "lines": {
+    "90": {
+     "importance": 5,
+     "tier": "core",
+     "note": "bound"
+    },
+    "91": {
+     "importance": 7,
+     "tier": "core",
+     "note": "first delimiter"
+    },
+    "92": {
+     "importance": 7,
+     "tier": "core",
+     "note": "initial index"
+    },
+    "93": {
+     "importance": 9,
+     "tier": "core",
+     "note": "result shape and the value parse"
+    },
+    "95": {
+     "importance": 9,
+     "tier": "core",
+     "note": "scan loop"
+    },
+    "96": {
+     "importance": 8,
+     "tier": "core",
+     "note": "next '='"
+    },
+    "97": {
+     "importance": 7,
+     "tier": "core",
+     "note": "no more params exit"
+    },
+    "99": {
+     "importance": 7,
+     "tier": "core",
+     "note": "next ';'"
+    },
+    "100": {
+     "importance": 7,
+     "tier": "core",
+     "note": "param end"
+    },
+    "102": {
+     "importance": 8,
+     "tier": "core",
+     "note": "the tricky boundary: '=' belongs to next param"
+    },
+    "103": {
+     "importance": 7,
+     "tier": "core",
+     "note": "resync"
+    },
+    "104": {
+     "importance": 5,
+     "tier": "core",
+     "note": "control only"
+    },
+    "107": {
+     "importance": 8,
+     "tier": "core",
+     "note": "key"
+    },
+    "108": {
+     "importance": 8,
+     "tier": "core",
+     "note": "value"
+    },
+    "110": {
+     "importance": 8,
+     "tier": "core",
+     "note": "quality special case"
+    },
+    "111": {
+     "importance": 9,
+     "tier": "core",
+     "note": "quality parse"
+    },
+    "113": {
+     "importance": 8,
+     "tier": "core",
+     "note": "records a param"
+    },
+    "116": {
+     "importance": 8,
+     "tier": "core",
+     "note": "loop progress"
+    },
+    "119": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/workspace/express/lib/utils.js",
+   "name": "setCharset",
+   "character": "thin wrapper, one real mutation",
+   "lines": {
+    "226": {
+     "importance": 6,
+     "tier": "core",
+     "note": "guard"
+    },
+    "227": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "passthrough"
+    },
+    "231": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "parse"
+    },
+    "234": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE point: set the charset"
+    },
+    "237": {
+     "importance": 10,
+     "tier": "boundary",
+     "note": "format and return"
+    }
+   }
+  },
+  {
+   "file": "/workspace/zod/packages/zod/src/v4/core/util.ts",
+   "name": "floatSafeRemainder",
+   "character": "epsilon-safe modulo",
+   "lines": {
+    "249": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the ratio"
+    },
+    "250": {
+     "importance": 8,
+     "tier": "core",
+     "note": "rounding"
+    },
+    "252": {
+     "importance": 9,
+     "tier": "core",
+     "note": "relative tolerance: the reason this function exists"
+    },
+    "253": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE epsilon test and zero return"
+    },
+    "254": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the remainder"
+    }
+   }
+  },
+  {
+   "file": "/workspace/zod/packages/zod/src/v4/core/util.ts",
+   "name": "pick",
+   "character": "schema surgery with lazy shape",
+   "lines": {
+    "604": {
+     "importance": 6,
+     "tier": "core",
+     "note": "def handle"
+    },
+    "606": {
+     "importance": 5,
+     "tier": "core",
+     "note": "checks handle"
+    },
+    "607": {
+     "importance": 5,
+     "tier": "core",
+     "note": "has-checks flag"
+    },
+    "608": {
+     "importance": 6,
+     "tier": "core",
+     "note": "refinement guard"
+    },
+    "609": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "escapes as exception"
+    },
+    "612": {
+     "importance": 9,
+     "tier": "core",
+     "note": "the merged def"
+    },
+    "613": {
+     "importance": 8,
+     "tier": "core",
+     "note": "lazy shape getter"
+    },
+    "614": {
+     "importance": 6,
+     "tier": "core",
+     "note": "new shape accumulator"
+    },
+    "615": {
+     "importance": 9,
+     "tier": "core",
+     "note": "mask loop"
+    },
+    "616": {
+     "importance": 8,
+     "tier": "core",
+     "note": "unknown-key validation"
+    },
+    "617": {
+     "importance": 6,
+     "tier": "boundary",
+     "note": "escapes as exception"
+    },
+    "619": {
+     "importance": 8,
+     "tier": "core",
+     "note": "falsy mask entries skip: the mask semantics"
+    },
+    "620": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE pick: copies the property"
+    },
+    "623": {
+     "importance": 7,
+     "tier": "core",
+     "note": "self-caching of the getter"
+    },
+    "624": {
+     "importance": 8,
+     "tier": "core",
+     "note": "getter answer"
+    },
+    "626": {
+     "importance": 6,
+     "tier": "core",
+     "note": "drops checks"
+    },
+    "629": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "the answer"
+    }
+   }
+  },
+  {
+   "file": "/workspace/zod/packages/zod/src/v4/core/util.ts",
+   "name": "aborted",
+   "character": "issue-scan predicate",
+   "lines": {
+    "818": {
+     "importance": 8,
+     "tier": "core",
+     "note": "explicit abort short-circuit"
+    },
+    "819": {
+     "importance": 8,
+     "tier": "core",
+     "note": "issue scan"
+    },
+    "820": {
+     "importance": 10,
+     "tier": "core",
+     "note": "THE test: any non-continuing issue aborts"
+    },
+    "821": {
+     "importance": 9,
+     "tier": "boundary",
+     "note": "early true"
+    },
+    "824": {
+     "importance": 8,
+     "tier": "boundary",
+     "note": "default false"
+    }
+   }
+  }
+ ]
+}
