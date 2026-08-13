@@ -6,3 +6,5 @@
 demo/**/*.class
 __pycache__/
 *.pyc
+demo/kotlin/out/
+demo/**/*.jar

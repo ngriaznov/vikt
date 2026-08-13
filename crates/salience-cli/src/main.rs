@@ -104,15 +104,22 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         "class" => {
             let bytes = std::fs::read(&args.input)?;
             let lowered = salience_jvm::lower_class(&bytes)?;
-            let note = if lowered.has_smap {
-                Some(format!(
-                    "{} carries a SourceDebugExtension (JSR-45/SMAP): some line numbers \
-refer to an inlined declaration site in another file, not to this one",
-                    lowered.binary_name
-                ))
-            } else {
-                None
-            };
+            let note = lowered.smap_stratum.as_ref().map(|stratum| {
+                format!(
+                    "{}: line numbers resolved through the SourceDebugExtension \
+(JSR-45/SMAP, `{stratum}` stratum); inlined bodies collapsed onto their call sites\
+{}",
+                    lowered.binary_name,
+                    if lowered.foreign_lines_dropped > 0 {
+                        format!(
+                            ", {} instruction(s) dropped as belonging to another source file",
+                            lowered.foreign_lines_dropped
+                        )
+                    } else {
+                        String::new()
+                    }
+                )
+            });
             ("salience-jvm/mokapot".to_owned(), lowered.functions, note)
         }
         "py" => {

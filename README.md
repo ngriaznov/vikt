@@ -121,11 +121,91 @@ Implement one function: substrate → `Vec<FunctionIr>`.
 | language | substrate | line fidelity | status |
 |---|---|---|---|
 | Java | JVM bytecode via `mokapot` | `LineNumberTable`, needs `javac -g` | **working** |
-| Kotlin | same | needs SMAP/JSR-45 handling for `inline` | frontend works; inline attribution unverified |
+| Kotlin | same | `LineNumberTable` **plus** JSR-45 SMAP resolution | **working** — see below |
 | Python | CPython bytecode via `dis` | PEP 626 `co_lines()`, exact | **working** |
 | Rust | MIR via `rustc_public` | MIR spans | blocked: nightly-only |
 | C/C++/Swift | LLVM IR `DILocation` | debug info | not attempted |
 | JS/TS | no standard IR; Google's JSIR is the exception | source maps | weak |
+
+## Kotlin: the measurement that changed the design
+
+The premise of using bytecode over ASTs is that Kotlin syntax hides real control
+flow. That premise cuts both ways, so it was tested rather than assumed. On
+`kotlinc 2.1.20`, against an **80-line** fixture:
+
+```
+usesInline LineNumberTable:  line 56 -> pc 6
+                             line 82 -> pc 11     <-- past end of file
+                             line 83 -> pc 16     <-- past end of file
+                             line 57 -> pc 19
+                             ...
+                             line 85 -> pc 108    <-- past end of file
+```
+
+Lines 82 through 89 are not source lines. They are positions in a synthetic
+composite file that exists only inside the `SourceDebugExtension` attribute:
+
+- **82–85** are the inlined body of `timed`, declared on lines 9–12.
+- **86–89** are inlined `map`, from `kotlin/collections/_Collections.kt` — the
+  standard library, a file the developer never opened.
+
+A tool that reads `LineNumberTable` and stops there emits spans for lines that
+do not exist, and silently attributes standard-library code to the user's file.
+That is not a rough edge; for a tool whose entire output is "line N matters", it
+is wrong output. **The naive implementation was wrong, and the measurement is
+what caught it.**
+
+The fix is the `KotlinDebug` stratum, which exists for exactly this and is what
+the IntelliJ debugger steps through:
+
+```
+*S KotlinDebug
+*L
+56#1:82,4      <- output lines 82..85 are all line 56
+79#1:86        <- output line 86 is line 79
+79#1:87,3      <- output lines 87..89 are line 79
+```
+
+Inlined work collapses onto its **call site**, which is also the right answer
+semantically: the developer sees `timed("sum") { ... }` on line 56, and the work
+the inlined body does really is work that line causes. After resolution, no span
+in the fixture exceeds line 79.
+
+### What every other Kotlin construct does
+
+Measured on the same fixture, not inferred:
+
+| construct | what happens to line numbers | handling |
+|---|---|---|
+| `inline` fun call site | lines past EOF, in a synthetic composite file | **SMAP-resolved to the call site** |
+| stdlib inline (`map`, `let`, …) | lines belonging to another file entirely | **SMAP-resolved; unmappable ones dropped and counted** |
+| `suspend` fun | 128/156 instructions carry a line; the state-machine dispatch carries none | benign — unlined instructions still participate in the graph, they just project nowhere |
+| continuation class (`Foo$bar$1`) | zero line information at all | benign — contributes no spans |
+| default arguments | the `$default` bridge is `ACC_SYNTHETIC` but carries a **full** line table duplicating the real method's | **filtered** — otherwise every such line is analyzed twice |
+| data class `equals`/`hashCode`/`copy`/`componentN` | not flagged synthetic, but carry no line table | benign |
+| `when` over enum | the `WhenMappings` class is entirely unlined | benign |
+| enum `$values`, `valueOf` | unlined or partially lined | benign |
+| property accessors | all attributed to the class declaration line | minor pile-up on one line |
+
+The `$default` case is the one that would have been easy to miss: it is the only
+generated member that carries a *complete* line table, so it looks like real
+code. Filtering `ACC_SYNTHETIC` and `ACC_BRIDGE` is also where JaCoCo landed
+after years of Kotlin coverage bug reports.
+
+### Reproducing
+
+```bash
+kotlinc demo/kotlin/Orders.kt -cp <coroutines.jar> -d demo/kotlin/out
+./target/release/salience demo/kotlin/out/demo/Processor.class --format text
+javap -p -c -l demo/kotlin/out/demo/Processor.class   # the raw table, for contrast
+```
+
+`cargo test -p salience-jvm` compiles Kotlin at test time when `kotlinc` is on
+PATH and asserts no span exceeds the file length; with SMAP resolution disabled
+that test fails with `span 47-47 exceeds the 45-line source file`. The mapping
+itself is pinned hermetically by unit tests in `crates/salience-jvm/src/smap.rs`
+using the exact attribute text `kotlinc` emitted, so losing the compiler loses
+coverage of the plumbing, not of the mapping.
 
 ## Usage
 
@@ -218,10 +298,13 @@ enters that loop.
 
 ## Known limitations
 
-- **Kotlin `inline` line attribution is unverified.** The frontend reports
-  whether a class carries `SourceDebugExtension` (JSR-45/SMAP) but does not
-  resolve it, so lines from an inlined body may point at the wrong file. This is
-  the largest open correctness question, and closing it needs a `kotlinc`.
+- **Property accessors pile onto the class declaration line.** Kotlin attributes
+  every generated getter to the line the class is declared on, so a data class
+  with many properties concentrates their salience on one line.
+- **Only the `KotlinDebug` stratum is understood.** Other JSR-45 producers
+  (JSP, Scala, Groovy) emit different strata; those fall back to the default
+  stratum, and lines resolving to a foreign file are dropped and counted rather
+  than mapped.
 - **SSA renames can vanish.** `double total = subtotal;` compiles to a pure
   rename that MokaIR erases, so that line gets no span.
 - **`mokapot`'s MokaIR is behind an `unstable-moka-ir` feature** with no
@@ -236,18 +319,18 @@ enters that loop.
 
 ## Tests
 
-27 tests: 17 in the core over hand-built IR (pinning the algorithm rather than
-any frontend's lowering), 4 over real `javac -g` output, 5 over real CPython
-bytecode, 1 doctest. The JVM and Python suites assert the *same* behavioral
-claims against equivalent source, which is the multi-language claim stated as a
-test.
+36 tests: 17 in the core over hand-built IR (pinning the algorithm rather than
+any frontend's lowering), 7 over real SMAP attribute text, 6 over real `javac -g`
+and `kotlinc` output, 5 over real CPython bytecode, 1 doctest. The JVM and
+Python suites assert the *same* behavioral claims against equivalent source,
+which is the multi-language claim stated as a test.
 
 ```bash
 cargo test
 ```
 
-JVM and Python tests skip rather than fail when no JDK or interpreter is
-present.
+JVM, Kotlin and Python tests skip rather than fail when no JDK, `kotlinc` or
+interpreter is present.
 
 ## License
 

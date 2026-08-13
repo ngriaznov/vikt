@@ -26,13 +26,17 @@
 // not identifiers.
 #![allow(clippy::doc_markdown)]
 
+pub mod smap;
+
 use std::collections::BTreeMap;
 
 use mokapot::ir::expression::{ArrayOperation, Expression, FieldAccess};
 use mokapot::ir::{Identifier, MokaIRMethodExt, MokaInstruction};
-use mokapot::jvm::Method;
 use mokapot::jvm::code::ProgramCounter;
+use mokapot::jvm::{Method, method};
 use salience_core::ir::{CallOpacity, FunctionId, FunctionIr, Node, NodeKind, VarId};
+
+use crate::smap::{Resolution, SourceMap};
 
 /// Something went wrong reading or lowering a class.
 #[derive(Debug, thiserror::Error)]
@@ -57,15 +61,19 @@ pub struct LoweredClass {
     pub source_file: Option<String>,
     /// The binary name of the class.
     pub binary_name: String,
-    /// Whether the class carries a `SourceDebugExtension` attribute.
+    /// Which SMAP stratum line numbers were resolved through, if the class
+    /// carried a `SourceDebugExtension`.
     ///
-    /// This is the JSR-45 / SMAP payload. Kotlin emits it for classes
-    /// containing inlined bodies, and its presence is the signal that some
-    /// lines in the `LineNumberTable` refer to *another* file — the file the
-    /// inline function was declared in, not this one. The prototype reports the
-    /// flag rather than resolving the mapping, so a consumer knows when line
-    /// attribution for this class deserves suspicion.
-    pub has_smap: bool,
+    /// Kotlin emits one for any class containing an inlined body. See
+    /// [`smap`] for why reading `LineNumberTable` without it produces spans
+    /// pointing past the end of the file.
+    pub smap_stratum: Option<String>,
+    /// How many instructions were dropped because their line belonged to
+    /// another source file inlined into this class.
+    ///
+    /// Reported rather than hidden: a class where this is large is one whose
+    /// map covers less of the body than the instruction count suggests.
+    pub foreign_lines_dropped: usize,
     /// One entry per method with a body.
     pub functions: Vec<FunctionIr>,
 }
@@ -89,12 +97,26 @@ pub fn lower_class(bytes: &[u8]) -> Result<LoweredClass, JvmError> {
         .unwrap_or_else(|| "<unknown>".to_owned());
     let binary_name = class.binary_name.to_string();
 
+    // Parse the SMAP before lowering anything: it decides what every line
+    // number in this class actually means.
+    let source_map = class
+        .source_debug_extension
+        .as_ref()
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(SourceMap::parse);
+
     let mut functions = Vec::new();
+    let mut foreign_lines_dropped = 0;
     for method in &class.methods {
         if method.body.is_none() {
             continue; // abstract or native: nothing to analyze
         }
-        if let Some(ir) = lower_method(method, &file, &binary_name) {
+        if is_generated(method) {
+            continue;
+        }
+        if let Some((ir, dropped)) = lower_method(method, &file, &binary_name, source_map.as_ref())
+        {
+            foreign_lines_dropped += dropped;
             functions.push(ir);
         }
     }
@@ -110,13 +132,44 @@ pub fn lower_class(bytes: &[u8]) -> Result<LoweredClass, JvmError> {
     Ok(LoweredClass {
         source_file,
         binary_name,
-        has_smap: class.source_debug_extension.is_some(),
+        smap_stratum: source_map.as_ref().map(|m| m.stratum().to_owned()),
+        foreign_lines_dropped,
         functions,
     })
 }
 
-/// Lowers one method, or returns `None` if MokaIR generation fails.
-fn lower_method(method: &Method, file: &str, owner: &str) -> Option<FunctionIr> {
+/// Whether a method is compiler-generated plumbing that should not contribute
+/// spans.
+///
+/// The motivating case is Kotlin's default-argument bridge. `withDefaults$default`
+/// is `ACC_SYNTHETIC`, and unlike most synthetic members it carries a *full*
+/// line table pointing at the same source lines as the real `withDefaults` —
+/// measured at 18/18 instructions attributed, against the real method's 7/10.
+/// Left in, every line of a function with default arguments is analyzed twice,
+/// once through a body that is nothing but argument defaulting and a delegating
+/// call.
+///
+/// Bridge methods are covariant-return forwarders with no semantics of their
+/// own, and go for the same reason. Filtering generated members is also what
+/// JaCoCo settled on after years of Kotlin coverage bug reports.
+///
+/// Note this is *not* the same as filtering everything Kotlin generates: data
+/// class `equals`/`hashCode`/`copy`/`componentN` are not flagged synthetic at
+/// all, but they carry no line table, so they produce no spans regardless.
+fn is_generated(method: &Method) -> bool {
+    method
+        .access_flags
+        .intersects(method::AccessFlags::SYNTHETIC | method::AccessFlags::BRIDGE)
+}
+
+/// Lowers one method, returning it alongside the number of instructions whose
+/// line belonged to another file. `None` if MokaIR generation fails.
+fn lower_method(
+    method: &Method,
+    file: &str,
+    owner: &str,
+    source_map: Option<&SourceMap>,
+) -> Option<(FunctionIr, usize)> {
     let moka = method.brew().ok()?;
     let body = method.body.as_ref()?;
 
@@ -142,6 +195,7 @@ fn lower_method(method: &Method, file: &str, owner: &str) -> Option<FunctionIr> 
     line_table.sort_unstable();
 
     let mut nodes: Vec<Node> = Vec::with_capacity(pcs.len());
+    let mut foreign = 0usize;
     for (pc, insn) in moka.instructions.iter() {
         let (kind, extra_uses) = classify(insn);
         let mut uses: Vec<VarId> = insn.uses().into_iter().map(var_id).collect();
@@ -156,8 +210,23 @@ fn lower_method(method: &Method, file: &str, owner: &str) -> Option<FunctionIr> 
             .map(|v| vec![var_id(Identifier::Local(v))])
             .unwrap_or_default();
 
+        // Raw table line -> real source line. Without the SMAP step this is
+        // where Kotlin inline call sites acquire lines past the end of the
+        // file, and where standard-library code gets attributed to the user's.
+        let raw_line = line_for(&line_table, *pc);
+        let line = match (raw_line, source_map) {
+            (Some(l), Some(map)) => match map.resolve(l) {
+                Resolution::Resolved(real) => Some(real),
+                Resolution::Foreign { .. } => {
+                    foreign += 1;
+                    None
+                }
+            },
+            (other, _) => other,
+        };
+
         nodes.push(Node {
-            line: line_for(&line_table, *pc),
+            line,
             kind,
             defs,
             uses,
@@ -180,16 +249,19 @@ fn lower_method(method: &Method, file: &str, owner: &str) -> Option<FunctionIr> 
     }
 
     let decl_line = nodes.iter().filter_map(|n| n.line).min();
-    Some(FunctionIr {
-        id: FunctionId {
-            file: file.to_owned(),
-            name: format!("{owner}::{}", method.name),
-            signature: method.descriptor.to_string(),
-            decl_line,
+    Some((
+        FunctionIr {
+            id: FunctionId {
+                file: file.to_owned(),
+                name: format!("{owner}::{}", method.name),
+                signature: method.descriptor.to_string(),
+                decl_line,
+            },
+            nodes,
+            entry: 0,
         },
-        nodes,
-        entry: 0,
-    })
+        foreign,
+    ))
 }
 
 /// Renders a JVM binary name (`java/util/logging/Logger`) the way source and

@@ -160,3 +160,156 @@ fn rejects_non_class_bytes() {
     assert!(salience_jvm::lower_class(b"not a class file at all").is_err());
     assert!(salience_jvm::lower_class(&[]).is_err());
 }
+
+// --- Kotlin -------------------------------------------------------------
+// These run only where a `kotlinc` is on PATH. The SMAP resolution they cover
+// is also pinned hermetically by the unit tests in `src/smap.rs`, which use the
+// exact attribute text a real `kotlinc 2.1.20` emitted for this fixture — so
+// losing the compiler loses coverage of the *plumbing*, not of the mapping.
+
+/// Exercises the constructs whose bytecode line attribution is in question:
+/// an inline function with a lambda, a stdlib inline call (`map`), a suspend
+/// function, `when` over an enum, default arguments, and a data class.
+const KOTLIN_SOURCE: &str = r#"package demo
+
+val LOG: java.util.logging.Logger = java.util.logging.Logger.getLogger("t")
+
+inline fun <T> timed(label: String, block: () -> T): T {
+    val start = System.nanoTime()
+    val result = block()
+    LOG.fine("$label took ${System.nanoTime() - start}ns")
+    return result
+}
+
+data class Order(val id: String, val amount: Double)
+
+enum class Kind { RETAIL, WHOLESALE }
+
+class Processor {
+    private var runningTotal: Double = 0.0
+
+    fun rateFor(kind: Kind): Double = when (kind) {
+        Kind.RETAIL -> 0.20
+        Kind.WHOLESALE -> 0.10
+    }
+
+    fun withDefaults(base: Double, markup: Double = 1.5): Double = base * markup
+
+    fun usesInline(prices: List<Double>): Double = timed("sum") {
+        var acc = 0.0
+        for (p in prices) {
+            acc += p
+        }
+        acc
+    }
+
+    fun mapped(prices: List<Double>): List<Double> = prices.map { it * 2.0 }
+
+    fun plain(prices: List<Double>): Double {
+        var subtotal = 0.0
+        for (p in prices) {
+            if (p < 0) continue
+            subtotal += p
+        }
+        runningTotal = subtotal
+        return subtotal
+    }
+}
+"#;
+
+/// Compiles Kotlin, returning the output directory, or `None` when no compiler
+/// is available.
+fn compile_kotlin(source: &str) -> Option<PathBuf> {
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("salience-kt-test-{}-{seq}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).ok()?;
+    let src = dir.join("Fixture.kt");
+    std::fs::write(&src, source).ok()?;
+
+    let out = Command::new("kotlinc")
+        .arg(&src)
+        .arg("-d")
+        .arg(dir.join("out"))
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        eprintln!("kotlinc failed: {}", String::from_utf8_lossy(&out.stderr));
+        return None;
+    }
+    Some(dir)
+}
+
+/// The regression this whole `smap` module exists for.
+///
+/// A Kotlin class containing inline call sites has `LineNumberTable` entries
+/// well past the end of its source file — they index a synthetic composite file
+/// that only the SMAP describes. Measured on `kotlinc 2.1.20`, an 80-line
+/// fixture produced entries for lines 82 through 89, four of which belonged to
+/// `kotlin/collections/_Collections.kt` rather than to the fixture at all.
+///
+/// After resolution every span must fall inside the real file.
+#[test]
+fn kotlin_inline_call_sites_do_not_produce_lines_past_end_of_file() {
+    let Some(dir) = compile_kotlin(KOTLIN_SOURCE) else {
+        eprintln!("skipping: kotlinc unavailable");
+        return;
+    };
+    let real_lines = u32::try_from(KOTLIN_SOURCE.lines().count()).unwrap();
+
+    let classes = dir.join("out").join("demo");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&classes).expect("kotlinc produced classes") {
+        let path = entry.expect("readable dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("class") {
+            continue;
+        }
+        let bytes = std::fs::read(&path).expect("class file readable");
+        let lowered = salience_jvm::lower_class(&bytes).expect("class parses");
+        let mut side = Sidecar::new("Fixture.kt", "salience-jvm/test");
+        for ir in &lowered.functions {
+            ir.validate().expect("well-formed graph");
+            let sal = analyze(ir, &Denylist::new(), &ScoreWeights::default());
+            side.push(ir, &sal);
+        }
+        side.finish();
+
+        for f in &side.functions {
+            for s in &f.spans {
+                assert!(
+                    s.end <= real_lines,
+                    "{}: {} span {}-{} exceeds the {}-line source file — SMAP \
+resolution failed",
+                    path.display(),
+                    f.name,
+                    s.start,
+                    s.end,
+                    real_lines
+                );
+            }
+        }
+        checked += 1;
+    }
+    assert!(checked > 0, "expected at least one class");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The class holding the inline call sites must actually carry an SMAP, or the
+/// test above would pass vacuously.
+#[test]
+fn kotlin_inlining_class_carries_a_source_map() {
+    let Some(dir) = compile_kotlin(KOTLIN_SOURCE) else {
+        eprintln!("skipping: kotlinc unavailable");
+        return;
+    };
+    let bytes = std::fs::read(dir.join("out").join("demo").join("Processor.class"))
+        .expect("Processor.class exists");
+    let lowered = salience_jvm::lower_class(&bytes).expect("class parses");
+    assert_eq!(
+        lowered.smap_stratum.as_deref(),
+        Some("KotlinDebug"),
+        "expected the call-site stratum to be the one used"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
