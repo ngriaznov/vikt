@@ -74,6 +74,17 @@ struct Args {
     /// assignment is unaffected by this choice.
     #[arg(long, value_enum, default_value_t = ScorerArg::Panel)]
     scorer: ScorerArg,
+
+    /// Skip function bodies larger than this many instructions (0 = no limit).
+    ///
+    /// The analysis is quadratic in body size, and every body ever observed
+    /// over this default was a machine-generated module-level data table -
+    /// emoji code maps, HTML entity lists - where per-line importance is
+    /// meaningless: an 18,086-instruction dict literal costs ~40 seconds to
+    /// score and every line of it would score the same. Skipped bodies are
+    /// reported on stderr, never silently dropped.
+    #[arg(long, value_name = "N", default_value_t = 4096)]
+    max_instructions: usize,
 }
 
 /// CLI surface of [`Scorer`].
@@ -184,6 +195,15 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         if ir.is_empty() {
+            continue;
+        }
+        if args.max_instructions > 0 && ir.len() > args.max_instructions {
+            eprintln!(
+                "salience: skipping {} ({} instructions > --max-instructions {})",
+                ir.id.name,
+                ir.len(),
+                args.max_instructions
+            );
             continue;
         }
         let sal = analyze_with_scorer(ir, &denylist, &weights, args.scorer.into());

@@ -25,6 +25,8 @@ struct Stats {
     functions: usize,
     functions_empty: usize,
     functions_invalid: usize,
+    /// Bodies over the size guard - generated data tables, not logic.
+    functions_skipped_huge: usize,
     instructions: usize,
     instructions_with_line: usize,
     /// Functions whose instructions carried no line at all.
@@ -65,6 +67,12 @@ impl Stats {
         }
         if ir.validate().is_err() {
             self.functions_invalid += 1;
+            return;
+        }
+        // Mirrors the CLI's --max-instructions default: every body ever seen
+        // over this size was a generated module-level data table.
+        if ir.len() > 4096 {
+            self.functions_skipped_huge += 1;
             return;
         }
         self.instructions += ir.len();
@@ -124,8 +132,12 @@ impl Stats {
             self.files_seen, self.files_failed, self.files_panicked
         );
         println!(
-            "functions    {} total, {} empty, {} malformed, {} with no line info",
-            self.functions, self.functions_empty, self.functions_invalid, self.functions_no_lines
+            "functions    {} total, {} empty, {} malformed, {} skipped as oversized data tables, {} with no line info",
+            self.functions,
+            self.functions_empty,
+            self.functions_invalid,
+            self.functions_skipped_huge,
+            self.functions_no_lines
         );
         println!(
             "instructions {} total, {} with a line ({:.1}%)",
