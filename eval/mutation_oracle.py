@@ -29,8 +29,9 @@ load-bearing (delete it and everything raises) while a reader calls it noise.
 Reporting both, and their disagreement, is the point.
 
 Accelerator imports (`from _heapq import *`, `from _statistics import
-_normal_dist_inv_cdf`) are stripped before execution in both the baseline and
-every mutant, so the Python definitions under test are the ones that run.
+_normal_dist_inv_cdf`) are turned into `raise ImportError` before execution, in
+both the baseline and every mutant, so each module takes its own pure-Python
+fallback path and the definitions under test are the ones that actually run.
 
     ./eval/mutation_oracle.py [--only name,name] [--out truth.json]
 """
@@ -589,31 +590,54 @@ def find_span(tree, qualname):
 
 
 def strip_accelerators(tree):
-    """Drop the C-accelerator imports, so the Python definitions survive.
+    """Force the pure-Python definitions to be the ones that run.
 
-    Two shapes matter: `from _heapq import *` at the end of heapq.py, and the
-    named form `from _statistics import _normal_dist_inv_cdf`. Both rebind a
-    Python definition to a C one; mutating the Python source then changes
-    nothing and every line of the function reads as unimportant. Only names the
-    module itself defines are stripped, so genuine helper imports survive.
+    Every accelerated stdlib module ends with some variant of
+
+        try:
+            from _heapq import *
+        except ImportError:
+            pass
+
+    and if that import succeeds the C implementation shadows the Python one.
+    Mutating the Python source then changes nothing and every line of the
+    function reads as unimportant - `statistics._normal_dist_inv_cdf` scored
+    exactly 0.0 on all 62 of its lines before this was handled.
+
+    Replacing the import with `raise ImportError` rather than deleting it is
+    what makes this correct in general: the module's own fallback path then runs
+    exactly as its author wrote it. Deleting the import instead leaves
+    `json.decoder`'s `c_scanstring = None` assignment - which lives in the
+    handler - unexecuted, and the module fails to import at all.
     """
-    defined = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            defined.add(node.name)
-        elif isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name):
-                    defined.add(t.id)
-
     class T(ast.NodeTransformer):
-        def visit_ImportFrom(self, node):
-            if not (node.module or "").startswith("_"):
+        def visit_Try(self, node):
+            self.generic_visit(node)
+            catches_import = any(
+                h.type is None
+                or (isinstance(h.type, ast.Name) and h.type.id == "ImportError")
+                or (isinstance(h.type, ast.Tuple)
+                    and any(isinstance(e, ast.Name) and e.id == "ImportError"
+                            for e in h.type.elts))
+                for h in node.handlers
+            )
+            if not catches_import:
                 return node
-            if any(a.name == "*" for a in node.names) or \
-                    all(a.name in defined for a in node.names):
-                # A `pass`, not a deletion: the import is usually the whole body
-                # of a `try`, and removing it outright leaves invalid syntax.
+            body = []
+            for st in node.body:
+                if isinstance(st, ast.ImportFrom) and (st.module or "").startswith("_"):
+                    body.append(ast.copy_location(ast.Raise(
+                        exc=ast.Name(id="ImportError", ctx=ast.Load()), cause=None), st))
+                else:
+                    body.append(st)
+            node.body = body
+            return node
+
+        def visit_ImportFrom(self, node):
+            # A star import at module level with no fallback: nothing to run
+            # instead, so just drop it.
+            if (node.module or "").startswith("_") and \
+                    any(a.name == "*" for a in node.names):
                 return ast.copy_location(ast.Pass(), node)
             return node
 

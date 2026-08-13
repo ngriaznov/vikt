@@ -1,0 +1,6714 @@
+{
+ "schema": "salience-mutation-oracle/v1",
+ "seed": 20260813,
+ "python": "3.11.15",
+ "functions": [
+  {
+   "file": "/usr/lib/python3.11/heapq.py",
+   "name": "_siftup",
+   "start": 260,
+   "end": 278,
+   "inputs": 40,
+   "mutants": 35,
+   "covered_lines": 13,
+   "lines": {
+    "261": {
+     "leverage": 0.85,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "262": {
+     "leverage": 0.85,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "263": {
+     "leverage": 0.85,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "265": {
+     "leverage": 0.326,
+     "leverage_no_delete": 0.2387,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "266": {
+     "leverage": 0.5514,
+     "leverage_no_delete": 0.626,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "268": {
+     "leverage": 0.5922,
+     "leverage_no_delete": 0.5063,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "269": {
+     "leverage": 0.4401,
+     "leverage_no_delete": 0.4722,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "270": {
+     "leverage": 0.2797,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "272": {
+     "leverage": 0.4217,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "273": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "274": {
+     "leverage": 0.6092,
+     "leverage_no_delete": 0.5441,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "277": {
+     "leverage": 0.4147,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "278": {
+     "leverage": 0.1667,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/heapq.py",
+   "name": "_siftdown",
+   "start": 207,
+   "end": 219,
+   "inputs": 40,
+   "mutants": 20,
+   "covered_lines": 10,
+   "lines": {
+    "208": {
+     "leverage": 0.925,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "211": {
+     "leverage": 0.2871,
+     "leverage_no_delete": 0.2633,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "212": {
+     "leverage": 0.5178,
+     "leverage_no_delete": 0.4624,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "213": {
+     "leverage": 0.85,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "214": {
+     "leverage": 0.2649,
+     "leverage_no_delete": 0.2301,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "215": {
+     "leverage": 0.2105,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "216": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "217": {
+     "leverage": 0.1148,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "218": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "219": {
+     "leverage": 0.2401,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/bisect.py",
+   "name": "bisect_right",
+   "start": 19,
+   "end": 50,
+   "inputs": 30,
+   "mutants": 47,
+   "covered_lines": 16,
+   "lines": {
+    "19": {
+     "leverage": 0.0971,
+     "leverage_no_delete": 0.0971,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "20": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "30": {
+     "leverage": 0.75,
+     "leverage_no_delete": 1.0,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "31": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "32": {
+     "leverage": 1.0,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "33": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "36": {
+     "leverage": 0.6216,
+     "leverage_no_delete": 0.9667,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "37": {
+     "leverage": 0.4617,
+     "leverage_no_delete": 0.5963,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "38": {
+     "leverage": 0.98,
+     "leverage_no_delete": 0.9833,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "39": {
+     "leverage": 0.4158,
+     "leverage_no_delete": 0.1237,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "40": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "42": {
+     "leverage": 0.7879,
+     "leverage_no_delete": 0.7172,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "44": {
+     "leverage": 0.3535,
+     "leverage_no_delete": 0.5151,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "45": {
+     "leverage": 0.7861,
+     "leverage_no_delete": 0.7409,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "46": {
+     "leverage": 0.4041,
+     "leverage_no_delete": 0.1061,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "47": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "49": {
+     "leverage": 0.7578,
+     "leverage_no_delete": 0.677,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "50": {
+     "leverage": 0.9234,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/bisect.py",
+   "name": "insort_right",
+   "start": 4,
+   "end": 16,
+   "inputs": 30,
+   "mutants": 8,
+   "covered_lines": 5,
+   "lines": {
+    "4": {
+     "leverage": 0.0758,
+     "leverage_no_delete": 0.0758,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "5": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "12": {
+     "leverage": 0.7376,
+     "leverage_no_delete": 0.9667,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "13": {
+     "leverage": 0.2265,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "15": {
+     "leverage": 0.2052,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "16": {
+     "leverage": 0.7787,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/fnmatch.py",
+   "name": "translate",
+   "start": 74,
+   "end": 185,
+   "inputs": 40,
+   "mutants": 243,
+   "covered_lines": 75,
+   "lines": {
+    "75": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "80": {
+     "leverage": 0.8514,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "81": {
+     "leverage": 0.8526,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "82": {
+     "leverage": 0.8526,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "83": {
+     "leverage": 0.4655,
+     "leverage_no_delete": 0.0783,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "84": {
+     "leverage": 0.8549,
+     "leverage_no_delete": 0.857,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "85": {
+     "leverage": 0.8514,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "86": {
+     "leverage": 0.7043,
+     "leverage_no_delete": 0.67,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "87": {
+     "leverage": 0.1802,
+     "leverage_no_delete": 0.1945,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "89": {
+     "leverage": 0.1957,
+     "leverage_no_delete": 0.2283,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "90": {
+     "leverage": 0.0652,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "91": {
+     "leverage": 0.154,
+     "leverage_no_delete": 0.0909,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "92": {
+     "leverage": 0.0143,
+     "leverage_no_delete": 0.0178,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "93": {
+     "leverage": 0.1498,
+     "leverage_no_delete": 0.0807,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "94": {
+     "leverage": 0.5963,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "95": {
+     "leverage": 0.0167,
+     "leverage_no_delete": 0.02,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "96": {
+     "leverage": 0.0197,
+     "leverage_no_delete": 0.0263,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "97": {
+     "leverage": 0.0065,
+     "leverage_no_delete": 0.0059,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "98": {
+     "leverage": 0.0198,
+     "leverage_no_delete": 0.0232,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "99": {
+     "leverage": 0.1433,
+     "leverage_no_delete": 0.1596,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "100": {
+     "leverage": 0.3736,
+     "leverage_no_delete": 0.3406,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "101": {
+     "leverage": 0.042,
+     "leverage_no_delete": 0.0322,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "102": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "104": {
+     "leverage": 0.5963,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "105": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "106": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "108": {
+     "leverage": 0.2314,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "109": {
+     "leverage": 0.0265,
+     "leverage_no_delete": 0.0007,
+     "mutants": 9,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "110": {
+     "leverage": 0.0029,
+     "leverage_no_delete": 0.0029,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "111": {
+     "leverage": 0.1185,
+     "leverage_no_delete": 0.0029,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "112": {
+     "leverage": 0.0592,
+     "leverage_no_delete": 0.001,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "113": {
+     "leverage": 0.234,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "114": {
+     "leverage": 0.0039,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "115": {
+     "leverage": 0.005,
+     "leverage_no_delete": 0.0047,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "116": {
+     "leverage": 0.1597,
+     "leverage_no_delete": 0.1349,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "117": {
+     "leverage": 0.2314,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "118": {
+     "leverage": 0.003,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "119": {
+     "leverage": 0.003,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "121": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 5,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "123": {
+     "leverage": 0.0998,
+     "leverage_no_delete": 0.1164,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "124": {
+     "leverage": 0.08,
+     "leverage_no_delete": 0.09,
+     "mutants": 9,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "125": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 12,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "126": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "129": {
+     "leverage": 0.0004,
+     "leverage_no_delete": 0.0005,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "132": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "133": {
+     "leverage": 0.13,
+     "leverage_no_delete": 0.1534,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "134": {
+     "leverage": 0.0695,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "136": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "137": {
+     "leverage": 0.0373,
+     "leverage_no_delete": 0.0211,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "139": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "141": {
+     "leverage": 0.1014,
+     "leverage_no_delete": 0.1239,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "142": {
+     "leverage": 0.1035,
+     "leverage_no_delete": 0.1209,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "143": {
+     "leverage": 0.0319,
+     "leverage_no_delete": 0.0398,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "144": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "145": {
+     "leverage": 0.0508,
+     "leverage_no_delete": 0.0414,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "147": {
+     "leverage": 0.1382,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "148": {
+     "leverage": 0.4253,
+     "leverage_no_delete": 0.8506,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "151": {
+     "leverage": 0.8514,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "152": {
+     "leverage": 0.5196,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "153": {
+     "leverage": 0.1516,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "154": {
+     "leverage": 0.1223,
+     "leverage_no_delete": 0.0931,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "156": {
+     "leverage": 0.6798,
+     "leverage_no_delete": 0.685,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "157": {
+     "leverage": 0.1055,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "158": {
+     "leverage": 0.5353,
+     "leverage_no_delete": 0.4906,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "166": {
+     "leverage": 0.5413,
+     "leverage_no_delete": 0.5681,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "167": {
+     "leverage": 0.2438,
+     "leverage_no_delete": 0.4877,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "168": {
+     "leverage": 0.4278,
+     "leverage_no_delete": 0.4078,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "169": {
+     "leverage": 0.3528,
+     "leverage_no_delete": 0.4908,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "170": {
+     "leverage": 0.0431,
+     "leverage_no_delete": 0.0448,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "171": {
+     "leverage": 0.2149,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "172": {
+     "leverage": 0.1817,
+     "leverage_no_delete": 0.3635,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "173": {
+     "leverage": 0.3651,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "174": {
+     "leverage": 0.3481,
+     "leverage_no_delete": 0.3443,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "175": {
+     "leverage": 0.1097,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "176": {
+     "leverage": 0.3336,
+     "leverage_no_delete": 0.3217,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "177": {
+     "leverage": 0.1456,
+     "leverage_no_delete": 0.0024,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "178": {
+     "leverage": 0.0499,
+     "leverage_no_delete": 0.0258,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "179": {
+     "leverage": 0.0205,
+     "leverage_no_delete": 0.0213,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "180": {
+     "leverage": 0.0731,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "182": {
+     "leverage": 0.0151,
+     "leverage_no_delete": 0.002,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "183": {
+     "leverage": 0.4253,
+     "leverage_no_delete": 0.8506,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "184": {
+     "leverage": 0.1406,
+     "leverage_no_delete": 0.06,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "185": {
+     "leverage": 0.3422,
+     "leverage_no_delete": 0.0789,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/difflib.py",
+   "name": "SequenceMatcher.get_matching_blocks",
+   "start": 421,
+   "end": 490,
+   "inputs": 30,
+   "mutants": 55,
+   "covered_lines": 27,
+   "lines": {
+    "422": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "440": {
+     "leverage": 0.5,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "441": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "442": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "450": {
+     "leverage": 0.3603,
+     "leverage_no_delete": 0.0404,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "451": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "452": {
+     "leverage": 0.4488,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "453": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "454": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "458": {
+     "leverage": 0.4488,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "459": {
+     "leverage": 0.4488,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "460": {
+     "leverage": 0.0405,
+     "leverage_no_delete": 0.0324,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "461": {
+     "leverage": 0.081,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "462": {
+     "leverage": 0.06,
+     "leverage_no_delete": 0.0457,
+     "mutants": 8,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "463": {
+     "leverage": 0.1584,
+     "leverage_no_delete": 0.1577,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "464": {
+     "leverage": 0.0882,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "469": {
+     "leverage": 0.577,
+     "leverage_no_delete": 0.154,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "470": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "471": {
+     "leverage": 0.4488,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "473": {
+     "leverage": 0.1349,
+     "leverage_no_delete": 0.0722,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "477": {
+     "leverage": 0.0018,
+     "leverage_no_delete": 0.0003,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "delete"
+     ]
+    },
+    "482": {
+     "leverage": 0.2098,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "483": {
+     "leverage": 0.2098,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "484": {
+     "leverage": 0.4368,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "485": {
+     "leverage": 0.1668,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "486": {
+     "leverage": 0.1668,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "488": {
+     "leverage": 0.153,
+     "leverage_no_delete": 0.0352,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "489": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "490": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/difflib.py",
+   "name": "SequenceMatcher.find_longest_match",
+   "start": 305,
+   "end": 419,
+   "inputs": 30,
+   "mutants": 133,
+   "covered_lines": 29,
+   "lines": {
+    "305": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "306": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "363": {
+     "leverage": 0.9333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "364": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "365": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "366": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "367": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "368": {
+     "leverage": 0.5105,
+     "leverage_no_delete": 0.021,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "372": {
+     "leverage": 0.9333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "373": {
+     "leverage": 0.9333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "374": {
+     "leverage": 0.1805,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "377": {
+     "leverage": 0.8667,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "378": {
+     "leverage": 0.9333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "379": {
+     "leverage": 0.1805,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "381": {
+     "leverage": 0.0835,
+     "leverage_no_delete": 0.1205,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "382": {
+     "leverage": 0.0096,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "383": {
+     "leverage": 0.0602,
+     "leverage_no_delete": 0.0903,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "384": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "385": {
+     "leverage": 0.2898,
+     "leverage_no_delete": 0.2074,
+     "mutants": 8,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "386": {
+     "leverage": 0.1466,
+     "leverage_no_delete": 0.1297,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "387": {
+     "leverage": 0.1609,
+     "leverage_no_delete": 0.1584,
+     "mutants": 9,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "388": {
+     "leverage": 0.16,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "394": {
+     "leverage": 0.169,
+     "leverage_no_delete": 0.2029,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "395": {
+     "leverage": 0.0111,
+     "leverage_no_delete": 0.0111,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const"
+     ]
+    },
+    "396": {
+     "leverage": 0.0415,
+     "leverage_no_delete": 0.0415,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const"
+     ]
+    },
+    "397": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 10,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "398": {
+     "leverage": 0.2083,
+     "leverage_no_delete": 0.2381,
+     "mutants": 8,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "399": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "bin"
+     ]
+    },
+    "400": {
+     "leverage": 0.0196,
+     "leverage_no_delete": 0.0196,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp"
+     ]
+    },
+    "401": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "410": {
+     "leverage": 0.1119,
+     "leverage_no_delete": 0.1342,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "411": {
+     "leverage": 0.0111,
+     "leverage_no_delete": 0.0111,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const"
+     ]
+    },
+    "412": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 7,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const"
+     ]
+    },
+    "413": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 10,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "414": {
+     "leverage": 0.1583,
+     "leverage_no_delete": 0.181,
+     "mutants": 8,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "415": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "bin"
+     ]
+    },
+    "416": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "cmp"
+     ]
+    },
+    "417": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "419": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/textwrap.py",
+   "name": "TextWrapper._wrap_chunks",
+   "start": 238,
+   "end": 339,
+   "inputs": 30,
+   "mutants": 135,
+   "covered_lines": 29,
+   "lines": {
+    "239": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "251": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "252": {
+     "leverage": 0.25,
+     "leverage_no_delete": 0.3333,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "253": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "254": {
+     "leverage": 0.5,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "255": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 5,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "256": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "258": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "259": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "cmp",
+      "delete"
+     ]
+    },
+    "260": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "264": {
+     "leverage": 0.7442,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "266": {
+     "leverage": 0.9645,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "270": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "271": {
+     "leverage": 0.545,
+     "leverage_no_delete": 0.09,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "274": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "275": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "277": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "280": {
+     "leverage": 0.5,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "284": {
+     "leverage": 0.132,
+     "leverage_no_delete": 0.1568,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "285": {
+     "leverage": 0.0367,
+     "leverage_no_delete": 0.0512,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "287": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "288": {
+     "leverage": 0.747,
+     "leverage_no_delete": 0.6205,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "291": {
+     "leverage": 0.5662,
+     "leverage_no_delete": 0.4216,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "delete"
+     ]
+    },
+    "292": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "293": {
+     "leverage": 0.142,
+     "leverage_no_delete": 0.1416,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "delete"
+     ]
+    },
+    "297": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "301": {
+     "leverage": 0.6791,
+     "leverage_no_delete": 0.6149,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "302": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "303": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "306": {
+     "leverage": 0.1898,
+     "leverage_no_delete": 0.2066,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "307": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "308": {
+     "leverage": 0.1482,
+     "leverage_no_delete": 0.1692,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "310": {
+     "leverage": 0.9645,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "311": {
+     "leverage": 0.9882,
+     "leverage_no_delete": 1.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "312": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 5,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const"
+     ]
+    },
+    "313": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "bool"
+     ]
+    },
+    "314": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "bool"
+     ]
+    },
+    "315": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "const"
+     ]
+    },
+    "316": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "const"
+     ]
+    },
+    "319": {
+     "leverage": 0.7391,
+     "leverage_no_delete": 0.6264,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "321": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "322": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bool",
+      "const",
+      "delete"
+     ]
+    },
+    "323": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "cmp"
+     ]
+    },
+    "324": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "325": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "326": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "327": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "328": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "330": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "331": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "332": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "cmp",
+      "delete"
+     ]
+    },
+    "334": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "335": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "336": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "337": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "339": {
+     "leverage": 0.9698,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/textwrap.py",
+   "name": "TextWrapper._handle_long_word",
+   "start": 197,
+   "end": 230,
+   "inputs": 20,
+   "mutants": 41,
+   "covered_lines": 10,
+   "lines": {
+    "198": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "207": {
+     "leverage": 0.3336,
+     "leverage_no_delete": 0.1669,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "208": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "210": {
+     "leverage": 0.538,
+     "leverage_no_delete": 0.076,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "214": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "215": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "216": {
+     "leverage": 0.699,
+     "leverage_no_delete": 0.5484,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "217": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "220": {
+     "leverage": 0.3333,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "221": {
+     "leverage": 0.2857,
+     "leverage_no_delete": 0.3333,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "222": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "223": {
+     "leverage": 0.469,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "224": {
+     "leverage": 1.0,
+     "leverage_no_delete": 1.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "229": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "230": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/textwrap.py",
+   "name": "TextWrapper._split",
+   "start": 157,
+   "end": 177,
+   "inputs": 20,
+   "mutants": 9,
+   "covered_lines": 4,
+   "lines": {
+    "158": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "172": {
+     "leverage": 0.471,
+     "leverage_no_delete": 0.2066,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "173": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "175": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "176": {
+     "leverage": 0.3409,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "177": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/textwrap.py",
+   "name": "dedent",
+   "start": 419,
+   "end": 467,
+   "inputs": 30,
+   "mutants": 34,
+   "covered_lines": 18,
+   "lines": {
+    "420": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "434": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "435": {
+     "leverage": 0.0386,
+     "leverage_no_delete": 0.034,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "436": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "437": {
+     "leverage": 0.0175,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "438": {
+     "leverage": 0.4254,
+     "leverage_no_delete": 0.8333,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "439": {
+     "leverage": 0.0175,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "443": {
+     "leverage": 0.0085,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "444": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "448": {
+     "leverage": 0.0085,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "449": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "454": {
+     "leverage": 0.0068,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "455": {
+     "leverage": 0.0064,
+     "leverage_no_delete": 0.006,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "456": {
+     "leverage": 0.0068,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "457": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "460": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "const",
+      "delete"
+     ]
+    },
+    "461": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "462": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "463": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const"
+     ]
+    },
+    "465": {
+     "leverage": 0.0175,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "466": {
+     "leverage": 0.0695,
+     "leverage_no_delete": 0.0869,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "467": {
+     "leverage": 0.9427,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/statistics.py",
+   "name": "_sum",
+   "start": 154,
+   "end": 205,
+   "inputs": 30,
+   "mutants": 25,
+   "covered_lines": 14,
+   "lines": {
+    "155": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "186": {
+     "leverage": 0.5095,
+     "leverage_no_delete": 0.019,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "187": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "188": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "189": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "190": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "191": {
+     "leverage": 0.4607,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "192": {
+     "leverage": 0.0535,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "193": {
+     "leverage": 0.3784,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "194": {
+     "leverage": 0.0177,
+     "leverage_no_delete": 0.0174,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "195": {
+     "leverage": 0.2476,
+     "leverage_no_delete": 0.1956,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "196": {
+     "leverage": 1.0,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "199": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "200": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "203": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "204": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "205": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/statistics.py",
+   "name": "_normal_dist_inv_cdf",
+   "start": 1089,
+   "end": 1160,
+   "inputs": 40,
+   "mutants": 182,
+   "covered_lines": 44,
+   "lines": {
+    "1095": {
+     "leverage": 0.4911,
+     "leverage_no_delete": 0.2366,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1096": {
+     "leverage": 0.0253,
+     "leverage_no_delete": 0.021,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "1097": {
+     "leverage": 0.4943,
+     "leverage_no_delete": 0.3841,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1099": {
+     "leverage": 0.4532,
+     "leverage_no_delete": 0.43,
+     "mutants": 17,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1100": {
+     "leverage": 0.1384,
+     "leverage_no_delete": 0.1384,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1101": {
+     "leverage": 0.192,
+     "leverage_no_delete": 0.192,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1102": {
+     "leverage": 0.2375,
+     "leverage_no_delete": 0.2375,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1103": {
+     "leverage": 0.256,
+     "leverage_no_delete": 0.256,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1104": {
+     "leverage": 0.2535,
+     "leverage_no_delete": 0.2535,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1105": {
+     "leverage": 0.2588,
+     "leverage_no_delete": 0.2588,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1106": {
+     "leverage": 0.2265,
+     "leverage_no_delete": 0.2265,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1107": {
+     "leverage": 0.4422,
+     "leverage_no_delete": 0.4167,
+     "mutants": 16,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1108": {
+     "leverage": 0.1609,
+     "leverage_no_delete": 0.1609,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1109": {
+     "leverage": 0.184,
+     "leverage_no_delete": 0.184,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1110": {
+     "leverage": 0.2181,
+     "leverage_no_delete": 0.2181,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1111": {
+     "leverage": 0.2537,
+     "leverage_no_delete": 0.2537,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1112": {
+     "leverage": 0.2583,
+     "leverage_no_delete": 0.2583,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1113": {
+     "leverage": 0.2082,
+     "leverage_no_delete": 0.2082,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1114": {
+     "leverage": 0.2065,
+     "leverage_no_delete": 0.2065,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1115": {
+     "leverage": 0.6793,
+     "leverage_no_delete": 0.5335,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "1116": {
+     "leverage": 0.2171,
+     "leverage_no_delete": 0.3065,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "1117": {
+     "leverage": 0.0848,
+     "leverage_no_delete": 0.0667,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "1118": {
+     "leverage": 0.125,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "1119": {
+     "leverage": 0.0522,
+     "leverage_no_delete": 0.0112,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "1120": {
+     "leverage": 0.1059,
+     "leverage_no_delete": 0.0989,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1122": {
+     "leverage": 0.0813,
+     "leverage_no_delete": 0.0751,
+     "mutants": 16,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1123": {
+     "leverage": 0.0091,
+     "leverage_no_delete": 0.0091,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1124": {
+     "leverage": 0.025,
+     "leverage_no_delete": 0.025,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1125": {
+     "leverage": 0.0295,
+     "leverage_no_delete": 0.0295,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1126": {
+     "leverage": 0.0386,
+     "leverage_no_delete": 0.0386,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1127": {
+     "leverage": 0.0508,
+     "leverage_no_delete": 0.0508,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1128": {
+     "leverage": 0.0605,
+     "leverage_no_delete": 0.0605,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1129": {
+     "leverage": 0.0689,
+     "leverage_no_delete": 0.0689,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1130": {
+     "leverage": 0.0769,
+     "leverage_no_delete": 0.0704,
+     "mutants": 16,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1131": {
+     "leverage": 0.0068,
+     "leverage_no_delete": 0.0068,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1132": {
+     "leverage": 0.0136,
+     "leverage_no_delete": 0.0136,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1133": {
+     "leverage": 0.0263,
+     "leverage_no_delete": 0.0263,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1134": {
+     "leverage": 0.0341,
+     "leverage_no_delete": 0.0341,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1135": {
+     "leverage": 0.05,
+     "leverage_no_delete": 0.05,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1136": {
+     "leverage": 0.0682,
+     "leverage_no_delete": 0.0682,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1137": {
+     "leverage": 0.0714,
+     "leverage_no_delete": 0.0714,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1139": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1141": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 16,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1142": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1143": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1144": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1145": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1146": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1147": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1148": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1149": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 16,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1150": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1151": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1152": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1153": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1154": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1155": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1156": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "1157": {
+     "leverage": 0.1446,
+     "leverage_no_delete": 0.1141,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "1158": {
+     "leverage": 0.0019,
+     "leverage_no_delete": 0.0025,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "1159": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "1160": {
+     "leverage": 0.0978,
+     "leverage_no_delete": 0.0592,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/urllib/parse.py",
+   "name": "urlsplit",
+   "start": 469,
+   "end": 523,
+   "inputs": 40,
+   "mutants": 80,
+   "covered_lines": 27,
+   "lines": {
+    "469": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "470": {
+     "leverage": 0.0108,
+     "leverage_no_delete": 0.0108,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "471": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "491": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "494": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "495": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "497": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "498": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "499": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "501": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "502": {
+     "leverage": 0.3054,
+     "leverage_no_delete": 0.0108,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "503": {
+     "leverage": 0.5984,
+     "leverage_no_delete": 0.1967,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "504": {
+     "leverage": 0.0579,
+     "leverage_no_delete": 0.0347,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "505": {
+     "leverage": 0.1967,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "506": {
+     "leverage": 0.0984,
+     "leverage_no_delete": 0.1967,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "507": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "509": {
+     "leverage": 0.1225,
+     "leverage_no_delete": 0.0977,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "510": {
+     "leverage": 0.0992,
+     "leverage_no_delete": 0.1013,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "511": {
+     "leverage": 0.1099,
+     "leverage_no_delete": 0.1194,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "512": {
+     "leverage": 0.2536,
+     "leverage_no_delete": 0.2958,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "513": {
+     "leverage": 0.355,
+     "leverage_no_delete": 0.355,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const"
+     ]
+    },
+    "514": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "515": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 6,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "516": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "517": {
+     "leverage": 0.1765,
+     "leverage_no_delete": 0.2291,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "518": {
+     "leverage": 0.3422,
+     "leverage_no_delete": 0.45,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "519": {
+     "leverage": 0.1618,
+     "leverage_no_delete": 0.1993,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "520": {
+     "leverage": 0.4092,
+     "leverage_no_delete": 0.5167,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "521": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "522": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "523": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/urllib/parse.py",
+   "name": "parse_qsl",
+   "start": 745,
+   "end": 816,
+   "inputs": 30,
+   "mutants": 55,
+   "covered_lines": 18,
+   "lines": {
+    "745": {
+     "leverage": 0.3,
+     "leverage_no_delete": 0.3,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "746": {
+     "leverage": 0.1557,
+     "leverage_no_delete": 0.1557,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "747": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "775": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "776": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "777": {
+     "leverage": 0.9333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "778": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "779": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "780": {
+     "leverage": 0.5182,
+     "leverage_no_delete": 0.1031,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "782": {
+     "leverage": 0.4925,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "784": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "785": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "788": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "789": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "790": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "791": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "793": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "795": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "796": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "801": {
+     "leverage": 0.5,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "802": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "803": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "804": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "806": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "807": {
+     "leverage": 0.8048,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "808": {
+     "leverage": 0.8048,
+     "leverage_no_delete": 0.8048,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "809": {
+     "leverage": 0.9333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "810": {
+     "leverage": 0.1833,
+     "leverage_no_delete": 0.3667,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "811": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "812": {
+     "leverage": 0.4556,
+     "leverage_no_delete": 0.1064,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "813": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "814": {
+     "leverage": 0.0224,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "815": {
+     "leverage": 0.8048,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "816": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/csv.py",
+   "name": "Sniffer.has_header",
+   "start": 383,
+   "end": 444,
+   "inputs": 30,
+   "mutants": 63,
+   "covered_lines": 27,
+   "lines": {
+    "393": {
+     "leverage": 0.7901,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "395": {
+     "leverage": 0.7901,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "397": {
+     "leverage": 0.7901,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "398": {
+     "leverage": 0.7901,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "399": {
+     "leverage": 0.0519,
+     "leverage_no_delete": null,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "401": {
+     "leverage": 0.4443,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "402": {
+     "leverage": 0.7259,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "404": {
+     "leverage": 0.2644,
+     "leverage_no_delete": 0.3306,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "405": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "406": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "408": {
+     "leverage": 0.363,
+     "leverage_no_delete": 0.7259,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "409": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "411": {
+     "leverage": 0.7259,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "412": {
+     "leverage": 0.8887,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "413": {
+     "leverage": 0.5963,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "414": {
+     "leverage": 0.5963,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "417": {
+     "leverage": 0.5963,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "419": {
+     "leverage": 0.7259,
+     "leverage_no_delete": 0.7259,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "420": {
+     "leverage": 0.3889,
+     "leverage_no_delete": 0.0519,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "421": {
+     "leverage": 0.7259,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "425": {
+     "leverage": 0.5963,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "429": {
+     "leverage": 0.8073,
+     "leverage_no_delete": 0.7259,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "430": {
+     "leverage": 0.0519,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "431": {
+     "leverage": 0.0173,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "432": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "433": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "435": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "437": {
+     "leverage": 0.0519,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "438": {
+     "leverage": 0.0519,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "440": {
+     "leverage": 0.0389,
+     "leverage_no_delete": 0.0346,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "442": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "444": {
+     "leverage": 0.4014,
+     "leverage_no_delete": 0.2765,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/os.py",
+   "name": "_walk",
+   "start": 345,
+   "end": 425,
+   "inputs": 6,
+   "mutants": 50,
+   "covered_lines": 29,
+   "lines": {
+    "346": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "347": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "348": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "355": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "358": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "360": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "361": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "362": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "364": {
+     "leverage": 0.9982,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "365": {
+     "leverage": 0.9982,
+     "leverage_no_delete": 0.9982,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "366": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "367": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "368": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "370": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "372": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "373": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "374": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "376": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "377": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "381": {
+     "leverage": 1.0,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "383": {
+     "leverage": 0.9119,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "384": {
+     "leverage": 0.8916,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "386": {
+     "leverage": 0.1783,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "388": {
+     "leverage": 0.9974,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "391": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "392": {
+     "leverage": 0.9945,
+     "leverage_no_delete": 0.989,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "394": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "395": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "400": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "401": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "403": {
+     "leverage": 0.9949,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "404": {
+     "leverage": 0.9949,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "407": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "408": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "411": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "412": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "413": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "418": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "419": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "422": {
+     "leverage": 0.9949,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "423": {
+     "leverage": 0.9949,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "425": {
+     "leverage": 0.9999,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/ipaddress.py",
+   "name": "_BaseV4._ip_int_from_string",
+   "start": 1187,
+   "end": 1211,
+   "inputs": 40,
+   "mutants": 20,
+   "covered_lines": 7,
+   "lines": {
+    "1189": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "1201": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "1202": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "1204": {
+     "leverage": 1.0,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "1205": {
+     "leverage": 0.7688,
+     "leverage_no_delete": 1.0,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "1206": {
+     "leverage": 0.0315,
+     "leverage_no_delete": 0.0097,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "1208": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "1209": {
+     "leverage": 1.0,
+     "leverage_no_delete": 1.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "1211": {
+     "leverage": 0.2905,
+     "leverage_no_delete": 0.094,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/json/decoder.py",
+   "name": "py_scanstring",
+   "start": 69,
+   "end": 126,
+   "inputs": 40,
+   "mutants": 105,
+   "covered_lines": 26,
+   "lines": {
+    "69": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "71": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "79": {
+     "leverage": 0.6615,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "80": {
+     "leverage": 0.5865,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "81": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "82": {
+     "leverage": 0.2795,
+     "leverage_no_delete": 0.2096,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "83": {
+     "leverage": 0.6615,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "84": {
+     "leverage": 0.3539,
+     "leverage_no_delete": 0.7077,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "85": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "86": {
+     "leverage": 0.4924,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "87": {
+     "leverage": 0.6615,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "89": {
+     "leverage": 0.0889,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "90": {
+     "leverage": 0.0889,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "93": {
+     "leverage": 0.6441,
+     "leverage_no_delete": 0.6123,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "94": {
+     "leverage": 0.7077,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "95": {
+     "leverage": 0.3843,
+     "leverage_no_delete": 0.5764,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "96": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "98": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "99": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "101": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "102": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "103": {
+     "leverage": 0.5438,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "104": {
+     "leverage": 0.5438,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "106": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "109": {
+     "leverage": 0.4589,
+     "leverage_no_delete": 0.4164,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "110": {
+     "leverage": 0.5616,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "111": {
+     "leverage": 0.5616,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "113": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "114": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "115": {
+     "leverage": 0.326,
+     "leverage_no_delete": 0.3447,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "117": {
+     "leverage": 0.26,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "118": {
+     "leverage": 0.0942,
+     "leverage_no_delete": 0.1071,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "119": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 15,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "bool",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "120": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "121": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 9,
+     "covered": false,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "122": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 14,
+     "covered": false,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "123": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "124": {
+     "leverage": 0.0673,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "125": {
+     "leverage": 0.1904,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "126": {
+     "leverage": 0.5304,
+     "leverage_no_delete": 0.1023,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/fractions.py",
+   "name": "Fraction.limit_denominator",
+   "start": 202,
+   "end": 255,
+   "inputs": 30,
+   "mutants": 56,
+   "covered_lines": 18,
+   "lines": {
+    "202": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "203": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "234": {
+     "leverage": 0.1739,
+     "leverage_no_delete": 0.2174,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "235": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "236": {
+     "leverage": 0.2087,
+     "leverage_no_delete": 0.3131,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "237": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "239": {
+     "leverage": 0.5465,
+     "leverage_no_delete": 0.4886,
+     "mutants": 7,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "240": {
+     "leverage": 0.8938,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "241": {
+     "leverage": 0.8938,
+     "leverage_no_delete": 0.8938,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "242": {
+     "leverage": 0.8964,
+     "leverage_no_delete": 0.9276,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "243": {
+     "leverage": 0.7467,
+     "leverage_no_delete": 0.6875,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "244": {
+     "leverage": 0.5959,
+     "leverage_no_delete": 0.4469,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "245": {
+     "leverage": 0.8938,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "246": {
+     "leverage": 0.6004,
+     "leverage_no_delete": 0.4536,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "247": {
+     "leverage": 0.6117,
+     "leverage_no_delete": 0.5761,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "249": {
+     "leverage": 0.5249,
+     "leverage_no_delete": 0.3548,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "250": {
+     "leverage": 0.269,
+     "leverage_no_delete": 0.1199,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "delete"
+     ]
+    },
+    "251": {
+     "leverage": 0.8652,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "252": {
+     "leverage": 0.3319,
+     "leverage_no_delete": 0.2445,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "delete"
+     ]
+    },
+    "253": {
+     "leverage": 0.4947,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "255": {
+     "leverage": 0.1867,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/pprint.py",
+   "name": "PrettyPrinter._safe_repr",
+   "start": 554,
+   "end": 633,
+   "inputs": 30,
+   "mutants": 147,
+   "covered_lines": 59,
+   "lines": {
+    "556": {
+     "leverage": 1.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "557": {
+     "leverage": 0.0659,
+     "leverage_no_delete": 0.1318,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "558": {
+     "leverage": 0.0152,
+     "leverage_no_delete": 0.0229,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "560": {
+     "leverage": 0.5659,
+     "leverage_no_delete": 0.1318,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "562": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "563": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "564": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "566": {
+     "leverage": 0.0071,
+     "leverage_no_delete": 0.0107,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "568": {
+     "leverage": 0.0702,
+     "leverage_no_delete": 0.0526,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "569": {
+     "leverage": 0.0024,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "570": {
+     "leverage": 0.0156,
+     "leverage_no_delete": 0.02,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "571": {
+     "leverage": 0.6,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "572": {
+     "leverage": 0.143,
+     "leverage_no_delete": 0.1662,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "573": {
+     "leverage": 0.0256,
+     "leverage_no_delete": 0.0097,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "574": {
+     "leverage": 0.1522,
+     "leverage_no_delete": 0.3045,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "575": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "576": {
+     "leverage": 0.1444,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "577": {
+     "leverage": 0.2208,
+     "leverage_no_delete": 0.0083,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "578": {
+     "leverage": 0.2275,
+     "leverage_no_delete": 0.0217,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "579": {
+     "leverage": 0.4333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "580": {
+     "leverage": 0.4333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "581": {
+     "leverage": 0.0539,
+     "leverage_no_delete": 0.0552,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "582": {
+     "leverage": 0.4333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "583": {
+     "leverage": 0.4333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "585": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "586": {
+     "leverage": 0.2198,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "587": {
+     "leverage": 0.4333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "589": {
+     "leverage": 0.4333,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "591": {
+     "leverage": 0.218,
+     "leverage_no_delete": 0.2215,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "592": {
+     "leverage": 0.0087,
+     "leverage_no_delete": 0.0087,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "593": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "delete"
+     ]
+    },
+    "594": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "595": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "596": {
+     "leverage": 0.1233,
+     "leverage_no_delete": 0.1477,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "598": {
+     "leverage": 0.089,
+     "leverage_no_delete": 0.076,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "599": {
+     "leverage": 0.0474,
+     "leverage_no_delete": 0.0474,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp"
+     ]
+    },
+    "600": {
+     "leverage": 0.9,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "601": {
+     "leverage": 0.0036,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "602": {
+     "leverage": 0.0176,
+     "leverage_no_delete": 0.0222,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "603": {
+     "leverage": 0.3045,
+     "leverage_no_delete": 0.009,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "604": {
+     "leverage": 0.1739,
+     "leverage_no_delete": 0.0097,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "605": {
+     "leverage": 0.1343,
+     "leverage_no_delete": 0.002,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "607": {
+     "leverage": 0.0031,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "608": {
+     "leverage": 0.017,
+     "leverage_no_delete": 0.0216,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "609": {
+     "leverage": 0.2024,
+     "leverage_no_delete": 0.0049,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "610": {
+     "leverage": 0.7,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "611": {
+     "leverage": 0.1559,
+     "leverage_no_delete": 0.1892,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "bool",
+      "cmp",
+      "delete"
+     ]
+    },
+    "612": {
+     "leverage": 0.0902,
+     "leverage_no_delete": 0.0988,
+     "mutants": 5,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "cmp",
+      "const",
+      "delete"
+     ]
+    },
+    "613": {
+     "leverage": 0.226,
+     "leverage_no_delete": 0.4519,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "614": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "615": {
+     "leverage": 0.2333,
+     "leverage_no_delete": 0.0,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "616": {
+     "leverage": 0.2111,
+     "leverage_no_delete": 0.0221,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "617": {
+     "leverage": 0.374,
+     "leverage_no_delete": 0.048,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "618": {
+     "leverage": 0.7,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "619": {
+     "leverage": 0.7,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "620": {
+     "leverage": 0.1276,
+     "leverage_no_delete": 0.1284,
+     "mutants": 4,
+     "covered": true,
+     "kinds": [
+      "aug",
+      "const",
+      "delete"
+     ]
+    },
+    "621": {
+     "leverage": 0.2795,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "622": {
+     "leverage": 0.7,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "624": {
+     "leverage": 0.2447,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "625": {
+     "leverage": 0.0237,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "626": {
+     "leverage": 0.0237,
+     "leverage_no_delete": 0.0237,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "627": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "628": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "629": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "630": {
+     "leverage": 0.28,
+     "leverage_no_delete": 0.3574,
+     "mutants": 3,
+     "covered": true,
+     "kinds": [
+      "bin",
+      "const",
+      "delete"
+     ]
+    },
+    "632": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "633": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 4,
+     "covered": false,
+     "kinds": [
+      "bool",
+      "const",
+      "delete"
+     ]
+    }
+   }
+  },
+  {
+   "file": "/usr/lib/python3.11/shlex.py",
+   "name": "split",
+   "start": 305,
+   "end": 315,
+   "inputs": 30,
+   "mutants": 18,
+   "covered_lines": 7,
+   "lines": {
+    "305": {
+     "leverage": 0.1436,
+     "leverage_no_delete": 0.1436,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const"
+     ]
+    },
+    "306": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "307": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "cmp",
+      "delete"
+     ]
+    },
+    "308": {
+     "leverage": 0.0,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": false,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "309": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "310": {
+     "leverage": 0.0,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": false,
+     "kinds": [
+      "const"
+     ]
+    },
+    "311": {
+     "leverage": 0.4993,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "312": {
+     "leverage": 0.1682,
+     "leverage_no_delete": 0.1682,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "313": {
+     "leverage": 0.0548,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    },
+    "314": {
+     "leverage": 0.0274,
+     "leverage_no_delete": 0.0,
+     "mutants": 2,
+     "covered": true,
+     "kinds": [
+      "const",
+      "delete"
+     ]
+    },
+    "315": {
+     "leverage": 0.5127,
+     "leverage_no_delete": null,
+     "mutants": 1,
+     "covered": true,
+     "kinds": [
+      "delete"
+     ]
+    }
+   }
+  }
+ ],
+ "skipped": []
+}

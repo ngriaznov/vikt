@@ -91,13 +91,40 @@ def resolution(doc):
     return allv, per_fn
 
 
+def load_truth(path, no_delete=False):
+    """Read either a blind-label file or a mutation-oracle file.
+
+    Both end up in the same shape - functions, each with {line: importance} -
+    so the same table can be produced against a human's ranking and against a
+    rater-free one. Oracle lines the driver corpus never executed are dropped:
+    a mutation on an unreached line cannot change anything, and scoring it zero
+    would say something about the corpus rather than the line.
+    """
+    doc = json.loads(Path(path).read_text())
+    if doc.get("schema", "").startswith("salience-mutation-oracle"):
+        key = "leverage_no_delete" if no_delete else "leverage"
+        fns = []
+        for f in doc["functions"]:
+            lines = {
+                ln: {"importance": m[key], "tier": "", "note": ""}
+                for ln, m in f["lines"].items()
+                if m["covered"] and m.get(key) is not None
+            }
+            if len(lines) >= 4:
+                fns.append({"file": f["file"], "name": f["name"].split(".")[-1],
+                            "character": "", "lines": lines})
+        return {"functions": fns, "kind": "oracle"}
+    doc["kind"] = "labels"
+    return doc
+
+
 def main():
     truth_path = Path(sys.argv[1])
     only = None
     if "--only" in sys.argv:
         only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
 
-    truth = json.loads(truth_path.read_text())
+    truth = load_truth(truth_path, no_delete="--no-delete" in sys.argv)
     scorers = json.loads((HERE / "scorers.json").read_text())
     if only:
         scorers = [s for s in scorers if s["name"] in only]
