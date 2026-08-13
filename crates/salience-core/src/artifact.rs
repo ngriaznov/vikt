@@ -31,8 +31,12 @@ pub struct SpanRecord {
     pub end: u32,
     /// `core` / `boundary` / `plumbing` / `inert`.
     pub tier: String,
-    /// Continuous salience for ranking, `0.0..=1.0`.
+    /// Continuous salience against a fixed scale, `0.0..=1.0`. Use for
+    /// thresholds and policy.
     pub score: f64,
+    /// Percentile of that score within this function, `0.0..=1.0`. Use for
+    /// heatmaps and for "show me the top of this body".
+    pub rank: f64,
     /// Why this run got its tier.
     pub reasons: Vec<String>,
 }
@@ -47,6 +51,7 @@ impl SpanRecord {
             // more precision than the weights justify invites false diffs
             // between runs on trivially different inputs.
             score: (s.score * 100.0).round() / 100.0,
+            rank: (s.rank * 100.0).round() / 100.0,
             reasons: s.reasons.clone(),
         }
     }

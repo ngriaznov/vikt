@@ -128,7 +128,11 @@ impl Stats {
             pct(self.instructions_with_line, self.instructions)
         );
         println!("lines tiered {lines}");
-        println!("  core       {:>7}  {:>5.1}%", self.lines_core, pct(self.lines_core, lines));
+        println!(
+            "  core       {:>7}  {:>5.1}%",
+            self.lines_core,
+            pct(self.lines_core, lines)
+        );
         println!(
             "  boundary   {:>7}  {:>5.1}%",
             self.lines_boundary,
@@ -139,7 +143,11 @@ impl Stats {
             self.lines_plumbing,
             pct(self.lines_plumbing, lines)
         );
-        println!("  inert      {:>7}  {:>5.1}%", self.lines_inert, pct(self.lines_inert, lines));
+        println!(
+            "  inert      {:>7}  {:>5.1}%",
+            self.lines_inert,
+            pct(self.lines_inert, lines)
+        );
 
         let mut sizes = self.sizes.clone();
         sizes.sort_unstable();
@@ -248,8 +256,7 @@ fn main() {
                 };
                 // A panic in one class must not end the run — finding out *that*
                 // it panics is part of what this is for.
-                let lowered =
-                    std::panic::catch_unwind(|| salience_jvm::lower_class(&bytes));
+                let lowered = std::panic::catch_unwind(|| salience_jvm::lower_class(&bytes));
                 match lowered {
                     Err(_) => {
                         stats.files_panicked += 1;

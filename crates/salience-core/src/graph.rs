@@ -79,6 +79,32 @@ pub struct Graph {
     pub uses_defs: Vec<BTreeSet<DefId>>,
     /// For each definition, the nodes that read it — oriented def → use.
     pub def_users: Vec<BTreeSet<NodeId>>,
+    /// Definitions made at each node, indexed rather than searched.
+    ///
+    /// Callers used to scan all of [`Graph::defs`] per node to find this, which
+    /// is `O(nodes x defs)` inside a fixpoint. On a 5,150-instruction static
+    /// initialiser in Guava that cost 1.9 seconds for one function.
+    pub defs_at: Vec<Vec<DefId>>,
+    /// How much of the function transitively depends on each node, as a count
+    /// of distinct dependent nodes.
+    ///
+    /// This is the forward dependence cone over data *and* control edges, and
+    /// it is the one genuinely continuous quantity the analysis produces: it
+    /// ranges over the whole width of the function rather than over a handful
+    /// of buckets. A statement everything downstream reads is not the same
+    /// kind of statement as one nothing reads, and no categorical tier can say
+    /// so.
+    pub influence: Vec<u32>,
+    /// How much of the function each node transitively depends *on* — the
+    /// backward cone.
+    ///
+    /// The mirror of [`Graph::influence`], and it earns its place by breaking
+    /// ties the forward cone cannot. A call whose result nobody reads has zero
+    /// influence no matter how much work went into its arguments; without this
+    /// term every such statement scores identically, and a heatmap of identical
+    /// values is a blank wall. Read the pair as "how much depends on this" and
+    /// "how much this depends on".
+    pub depends_on: Vec<u32>,
 }
 
 impl Graph {
@@ -99,6 +125,20 @@ impl Graph {
         let (defs, rd_in) = reaching_definitions(ir, &preds, &rpo);
         let (uses_defs, def_users) = def_use_chains(ir, &defs, &rd_in);
 
+        let mut defs_at: Vec<Vec<DefId>> = vec![Vec::new(); n];
+        for (id, site) in defs.iter().enumerate() {
+            defs_at[site.node].push(id);
+        }
+        let succ = dependence_successors(n, &defs, &defs_at, &def_users, &ctrl_deps);
+        let influence = cone_sizes(n, &succ);
+        let mut pred: Vec<Vec<NodeId>> = vec![Vec::new(); n];
+        for (from, tos) in succ.iter().enumerate() {
+            for &to in tos {
+                pred[to].push(from);
+            }
+        }
+        let depends_on = cone_sizes(n, &pred);
+
         Self {
             n,
             rpo,
@@ -113,7 +153,19 @@ impl Graph {
             rd_in,
             uses_defs,
             def_users,
+            defs_at,
+            influence,
+            depends_on,
         }
+    }
+
+    /// [`Graph::influence`] as a fraction of the function, in `0.0..=1.0`.
+    #[must_use]
+    pub fn influence_fraction(&self, node: NodeId) -> f64 {
+        if self.n <= 1 {
+            return 0.0;
+        }
+        f64::from(self.influence[node]) / (self.n - 1) as f64
     }
 
     /// Whether `a` dominates `b`, by walking the dominator tree upward.
@@ -165,6 +217,157 @@ impl Graph {
             .iter()
             .any(|l| l.body.contains(&site.node) && self.rd_in[l.header].contains(&def))
     }
+}
+
+/// Forward dependence edges: who consumes what this node produces, and who is
+/// controlled by it.
+fn dependence_successors(
+    n: usize,
+    defs: &[DefSite],
+    defs_at: &[Vec<DefId>],
+    def_users: &[BTreeSet<NodeId>],
+    ctrl_deps: &[BTreeSet<NodeId>],
+) -> Vec<Vec<NodeId>> {
+    let _ = defs;
+    let mut out: Vec<Vec<NodeId>> = vec![Vec::new(); n];
+    for node in 0..n {
+        for &d in &defs_at[node] {
+            out[node].extend(def_users[d].iter().copied());
+        }
+    }
+    // A branch influences everything control-dependent on it.
+    for (dependent, branches) in ctrl_deps.iter().enumerate() {
+        for &b in branches {
+            out[b].push(dependent);
+        }
+    }
+    for v in &mut out {
+        v.sort_unstable();
+        v.dedup();
+    }
+    out
+}
+
+/// Size of each node's transitive cone in an arbitrary adjacency list.
+///
+/// Computed by condensing the dependence graph into strongly connected
+/// components and unioning reachability sets in reverse topological order, so
+/// each edge is relaxed once. The naive alternative — a per-node search, or a
+/// union-to-fixpoint over the cyclic graph — is quadratic or worse, and
+/// function bodies in real libraries reach 5,000 instructions.
+fn cone_sizes(n: usize, succ: &[Vec<NodeId>]) -> Vec<u32> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let (comp_of, comps) = strongly_connected(n, succ);
+    let ncomp = comps.len();
+
+    // Condensed edges, deduplicated.
+    let mut cedges: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); ncomp];
+    for node in 0..n {
+        for &s in &succ[node] {
+            if comp_of[node] != comp_of[s] {
+                cedges[comp_of[node]].insert(comp_of[s]);
+            }
+        }
+    }
+
+    // `strongly_connected` emits components in reverse topological order, so a
+    // component's successors are always already complete when it is processed.
+    let words = n.div_ceil(64);
+    let mut reach: Vec<Vec<u64>> = vec![vec![0u64; words]; ncomp];
+    for c in 0..ncomp {
+        // Every member of the component reaches every other member.
+        for &m in &comps[c] {
+            reach[c][m / 64] |= 1u64 << (m % 64);
+        }
+        let succ_comps: Vec<usize> = cedges[c].iter().copied().collect();
+        for sc in succ_comps {
+            let (lo, hi) = if sc < c {
+                let (a, b) = reach.split_at_mut(c);
+                (&mut b[0], &a[sc])
+            } else {
+                let (a, b) = reach.split_at_mut(sc);
+                (&mut a[c], &b[0])
+            };
+            for w in 0..words {
+                lo[w] |= hi[w];
+            }
+        }
+    }
+
+    (0..n)
+        .map(|node| {
+            let c = comp_of[node];
+            let mut count: u32 = reach[c].iter().map(|w| w.count_ones()).sum();
+            // A node does not depend on itself.
+            if reach[c][node / 64] & (1u64 << (node % 64)) != 0 {
+                count -= 1;
+            }
+            count
+        })
+        .collect()
+}
+
+/// Iterative Tarjan. Returns each node's component id and the members of each
+/// component, with components emitted in reverse topological order.
+fn strongly_connected(n: usize, succ: &[Vec<NodeId>]) -> (Vec<usize>, Vec<Vec<NodeId>>) {
+    const UNVISITED: usize = usize::MAX;
+    let mut index = vec![UNVISITED; n];
+    let mut low = vec![0usize; n];
+    let mut on_stack = vec![false; n];
+    let mut stack: Vec<NodeId> = Vec::new();
+    let mut comp_of = vec![UNVISITED; n];
+    let mut comps: Vec<Vec<NodeId>> = Vec::new();
+    let mut next_index = 0usize;
+
+    // (node, next successor to visit)
+    let mut call: Vec<(NodeId, usize)> = Vec::new();
+    for root in 0..n {
+        if index[root] != UNVISITED {
+            continue;
+        }
+        call.push((root, 0));
+        index[root] = next_index;
+        low[root] = next_index;
+        next_index += 1;
+        stack.push(root);
+        on_stack[root] = true;
+
+        while let Some(&mut (v, ref mut i)) = call.last_mut() {
+            if let Some(&w) = succ[v].get(*i) {
+                *i += 1;
+                if index[w] == UNVISITED {
+                    index[w] = next_index;
+                    low[w] = next_index;
+                    next_index += 1;
+                    stack.push(w);
+                    on_stack[w] = true;
+                    call.push((w, 0));
+                } else if on_stack[w] {
+                    low[v] = low[v].min(index[w]);
+                }
+            } else {
+                call.pop();
+                if let Some(&mut (parent, _)) = call.last_mut() {
+                    low[parent] = low[parent].min(low[v]);
+                }
+                if low[v] == index[v] {
+                    let mut members = Vec::new();
+                    while let Some(w) = stack.pop() {
+                        on_stack[w] = false;
+                        comp_of[w] = comps.len();
+                        members.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    comps.push(members);
+                }
+            }
+        }
+    }
+    (comp_of, comps)
 }
 
 /// Builds the predecessor lists.

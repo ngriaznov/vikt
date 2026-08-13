@@ -39,11 +39,37 @@ only dependence does.
 | `plumbing` | present but not behavior-carrying: local shuffling, results that reach no effect |
 | `inert` | denylisted calls (logging, metrics, tracing) and the computation that exists only to feed them |
 
-Alongside the tier, every span carries a score in `0.0..=1.0`. The **tier is for
-policy** — an edit-gating hook wants a predicate. The **score is for ranking** —
-a weighted call graph, a profiler choosing where to start, or a vulnerability
-triage queue wants an ordering, and four buckets throw away the gradient between
-a predicate guarding two lines and one guarding forty.
+Alongside the tier, every span carries two numbers:
+
+- **`score`** — `0.0..=1.0` against a fixed scale. For thresholds and policy.
+- **`rank`** — percentile within its own function. For heatmaps, and for "show
+  me the top of this body". A function whose scores all sit near 0.3 still has a
+  most-important line; painting it against the global scale would render the
+  whole body one flat colour.
+
+The score is composed from five continuous or near-continuous terms — forward
+dependence cone, backward dependence cone, effect kind, control-dominance mass,
+and loop depth. The two cones are what give it resolution: they range over the
+width of the function rather than over a handful of buckets.
+
+## Calibration
+
+Every threshold and weight here was set against real code, not chosen a priori:
+~28,000 JVM library functions (Guava, commons-lang3, jackson-databind, OkHttp)
+and the Python standard library. `cargo run --release --example evaluate` is the
+harness. Three findings changed the design:
+
+- **"Reaches an effect" is not a tier.** It held for 86-100% of statements,
+  because real code is dense with calls, and produced a constant map. It is now
+  an explanation only; `core` is driven by influence, control mass and
+  loop-carried dataflow.
+- **Inert needs two conditions, not one.** Keying it on "feeds logging and
+  reaches no hard effect" mislabelled 56% of its hits — including a network read
+  poisoned by a single `print` ten lines away. Keying it on usefulness alone took
+  that to 90%, swallowing `pass` and constant definitions. It now requires both
+  no useful sink downstream *and* a denylisted one.
+- **Effects must score for being effects.** The cone terms alone rank a `return`
+  below the setup lines feeding it, because nothing depends on a return.
 
 ## What it's for
 

@@ -69,7 +69,15 @@ pub enum Reason {
         /// Nesting depth of the innermost containing loop.
         depth: u32,
     },
-    /// On a def-use or control chain reaching an effect.
+    /// A large share of the function transitively depends on this statement.
+    HighInfluence {
+        /// Fraction of the body that depends on it, `0.0..=1.0`.
+        fraction: f64,
+        /// Number of dependent instructions.
+        dependents: u32,
+    },
+    /// On a def-use or control chain reaching an effect. Informational: on real
+    /// code almost every statement satisfies this, so it cannot carry a tier.
     ReachesEffect {
         /// Number of dependence steps to the nearest effect.
         distance: u32,
@@ -88,7 +96,7 @@ pub enum Reason {
         /// The callee that matched.
         callee: String,
     },
-    /// Exists only to construct arguments for denylisted calls.
+    /// Every use of this value dead-ends in a denylisted call.
     InertSupport,
     /// Computation whose results reach no effect.
     Unreaching,
@@ -101,10 +109,14 @@ impl Reason {
         match self {
             Self::BranchPredicate { .. }
             | Self::LoopCarried { .. }
-            | Self::ReachesEffect { .. } => Tier::Core,
+            | Self::HighInfluence { .. } => Tier::Core,
             Self::EffectSite { .. } => Tier::Boundary,
             Self::Denylisted { .. } | Self::InertSupport => Tier::Inert,
-            Self::Unreaching => Tier::Plumbing,
+            // `ReachesEffect` is deliberately *not* Core. Measured over ~28,000
+            // library functions it holds for 86-100% of statements, because real
+            // code is dense with calls. A predicate that is almost always true
+            // cannot carry a tier; it survives only as an explanation.
+            Self::ReachesEffect { .. } | Self::Unreaching => Tier::Plumbing,
         }
     }
 
@@ -119,13 +131,20 @@ impl Reason {
             Self::LoopCarried { depth } => {
                 format!("loop-carried definition at nesting depth {depth}")
             }
+            Self::HighInfluence {
+                fraction,
+                dependents,
+            } => format!(
+                "{dependents} instructions depend on this ({:.0}% of the body)",
+                fraction * 100.0
+            ),
             Self::ReachesEffect { distance, effect } => {
                 format!("reaches {effect} in {distance} dependence step(s)")
             }
             Self::EffectSite { kind, target } if target.is_empty() => (*kind).to_owned(),
             Self::EffectSite { kind, target } => format!("{kind} -> {target}"),
             Self::Denylisted { callee } => format!("denylisted call {callee}"),
-            Self::InertSupport => "builds arguments for a denylisted call only".to_owned(),
+            Self::InertSupport => "every use of this value ends in a denylisted call".to_owned(),
             Self::Unreaching => "result reaches no effect".to_owned(),
         }
     }
@@ -246,32 +265,51 @@ impl Default for Denylist {
 /// that dislikes the defaults changes an ordering, never a policy decision.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScoreWeights {
-    /// Floor contributed by the `core` tier.
-    pub base_core: f64,
-    /// Floor contributed by the `boundary` tier.
-    pub base_boundary: f64,
-    /// Floor contributed by the `plumbing` tier.
-    pub base_plumbing: f64,
-    /// Multiplier on a branch's control-dominance fraction.
-    pub control: f64,
-    /// Multiplier on normalized loop nesting depth.
-    pub loop_depth: f64,
-    /// Multiplier on proximity to the nearest effect.
+    /// Weight on the share of the function that transitively depends on a
+    /// statement. This is the term that gives the score its resolution: it is
+    /// continuous over the width of the body, where every other term takes a
+    /// handful of values.
+    pub influence: f64,
+    /// Weight on proximity to the nearest effect.
     pub proximity: f64,
+    /// Weight on a branch's control-dominance fraction.
+    pub control: f64,
+    /// Weight on normalized loop nesting depth.
+    pub loop_depth: f64,
+    /// Weight on the share of the function a statement transitively depends on.
+    pub dependency: f64,
+    /// Weight on being an effect rather than merely leading to one.
+    ///
+    /// Without this the two cone terms systematically bury the point of the
+    /// function: a `return` has an empty forward cone because nothing depends
+    /// on it, so it scored *below* the setup lines feeding it. Measured on
+    /// `shutil._make_zipfile`, `return zip_filename` ranked in the bottom
+    /// quartile while `zip_filename = base_name + ".zip"` ranked top. Being the
+    /// place behavior becomes observable is its own kind of importance.
+    pub effect: f64,
 }
 
 impl Default for ScoreWeights {
     fn default() -> Self {
         Self {
-            base_core: 0.55,
-            base_boundary: 0.45,
-            base_plumbing: 0.15,
-            control: 0.35,
-            loop_depth: 0.15,
-            proximity: 0.20,
+            influence: 0.30,
+            proximity: 0.05,
+            control: 0.15,
+            loop_depth: 0.10,
+            dependency: 0.15,
+            effect: 0.25,
         }
     }
 }
+
+/// Share of the body that must depend on a statement for it to count as
+/// behavior-carrying on influence alone.
+///
+/// Calibrated against ~28,000 JVM library functions and the Python standard
+/// library rather than chosen a priori: the previous rule — "is on a def-use
+/// chain reaching an effect" — was true of 86-100% of statements and produced a
+/// constant map.
+pub const CORE_INFLUENCE: f64 = 0.10;
 
 /// Per-node analysis result.
 #[derive(Debug, Clone)]
@@ -309,10 +347,34 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
     let graph = Graph::build(ir);
     let n = ir.nodes.len();
 
-    // --- denylist seeds --------------------------------------------------
-    // A frontend reports `log.info(...)` as an opaque call, because a frontend
-    // cannot know which callees are inert. Matching happens here so one policy
-    // governs every language.
+    // --- inert set -------------------------------------------------------
+    // A statement is inert when *every* chain of uses leading out of it
+    // dead-ends in a denylisted call.
+    //
+    // The previous rule was "feeds a denylisted call and reaches no hard
+    // effect", and measurement killed it: 56% of the lines it marked inert on
+    // the Python standard library had nothing to do with logging. The failure
+    // is instructive. In
+    //
+    //     line = response.fp.readline(...)     <- the network read
+    //     ...
+    //     if self.debuglevel > 0: print('header:', line.decode())
+    //
+    // `line` feeds a denylisted `print`, and its other consumers — `len`, `in`,
+    // comparisons — are opaque calls rather than returns or writes, so "reaches
+    // no hard effect" held and the read scored 0.00. One debug print poisoned
+    // the whole variable.
+    //
+    // The fix is to ask the opposite question. Compute the set of *useful*
+    // statements as backward reachability from useful sinks — every anchor
+    // (return, throw, state write) and every call that is not denylisted — and
+    // call a statement inert only if it is not useful. Now `len(line)` is a
+    // useful sink, so `line` survives; a counter incremented solely to be
+    // logged still has no useful sink anywhere downstream and is still inert.
+    //
+    // Backward reachability rather than a fixpoint over "all consumers are
+    // inert", because the valuable case is a dependency cycle: a counter reads
+    // its own previous value, and a least-fixpoint never enters that loop.
     let denylisted: Vec<bool> = (0..n)
         .map(|i| match &ir.nodes[i].kind {
             NodeKind::Call { callee, .. } => denylist.matches(callee),
@@ -320,63 +382,47 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
         })
         .collect();
 
-    // --- inert set -------------------------------------------------------
-    // A statement is inert when its value feeds a denylisted call and reaches
-    // no hard effect. Both halves are needed: the first finds the logging
-    // machinery, the second protects any value the logging merely happens to
-    // share with real work.
+    // The closure must follow control dependence as well as data. A branch
+    // defines nothing, so a data-only closure can never reach one — and marking
+    // every predicate in the program inert is exactly as wrong as it sounds
+    // (measured: 58% of lines in large functions).
+    // Seeds are the statements that are useful *in themselves*: hard effects,
+    // and calls made purely for their side effect — those whose result nobody
+    // reads. Everything else earns usefulness by feeding one.
     //
-    // Both halves are backward reachability over def-use, deliberately, rather
-    // than an "every consumer is inert" fixpoint. That formulation cannot
-    // absorb a dependency cycle, and the single most valuable case here is a
-    // cycle: a counter incremented only to be logged reads its own previous
-    // value, so it and its increment form a loop a least-fixpoint never enters.
-    //
-    // "Hard effect" rather than "effect" is the other load-bearing choice. An
-    // opaque call is an effect only because we declined to look inside it, so
-    // `prices.size()` inside a log argument must not count as the value having
-    // escaped — otherwise the denylist stops at the logging call itself and
-    // leaves every argument expression tiered as behavior, which is not the job
-    // it exists to do. Returns, throws and state writes are observable without
-    // seeing inside any callee, so they always count. Absorbing opaque calls
-    // this way is a real soundness trade, bounded to the frontier we already
-    // chose not to cross.
-    let feeds_denylist = backward_closure(&graph, (0..n).filter(|&i| denylisted[i]));
-    let reaches_hard = backward_closure(
+    // "Calls made for their side effect" rather than "all calls" is the
+    // distinction that took two attempts to get right. Treating every
+    // non-denylisted call as a useful sink looks reasonable until you notice
+    // that string concatenation is a call: `"inspected " + inspected` is not
+    // denylisted, so a counter incremented solely to be logged became useful
+    // through the concatenation built for the log message. Asking instead
+    // whether anyone reads the result separates `zf.write(path, arcname)`,
+    // whose result is discarded because the write *is* the point, from
+    // `makeConcatWithConstants`, whose result is read by a logging call and
+    // nothing else.
+    let useful = useful_closure(
         &graph,
-        (0..n).filter(|&i| is_hard_effect(&ir.nodes[i].kind)),
+        (0..n).filter(|&i| {
+            let k = &ir.nodes[i].kind;
+            is_hard_effect(k)
+                || (matches!(k, NodeKind::Call { .. })
+                    && !denylisted[i]
+                    && result_discarded(ir, &graph, i))
+        }),
     );
-    let mut inert: Vec<bool> = (0..n)
-        .map(|i| denylisted[i] || (feeds_denylist[i] && !reaches_hard[i]))
+    // Not-useful alone is *not* inert. `pass` in an `except:` block is useless
+    // too, and calling it inert says "this is logging", which is false and
+    // measurably common: keying inert on usefulness alone put `pass`,
+    // `blocksize = 2 ** 27` and bare `errno.EINVAL)` in the tier, taking the
+    // false-positive rate from 56% to 90%.
+    //
+    // Inert means specifically "exists to feed logging". That needs both halves:
+    // no useful sink downstream, *and* a denylisted one. Dead code with no
+    // logging downstream is plumbing, which is what that tier is for.
+    let feeds_denylist = backward_closure(&graph, (0..n).filter(|&i| denylisted[i]));
+    let inert: Vec<bool> = (0..n)
+        .map(|i| denylisted[i] || (!useful[i] && feeds_denylist[i]))
         .collect();
-
-    // Instructions that only *consume* an inert value sit downstream of that
-    // closure rather than inside it, so backward reachability never reaches
-    // them. CPython's `POP_TOP` discarding a log call's result is the common
-    // case; without this pass a logging line reads as plumbing rather than
-    // inert, because the discard is the one instruction on it that the closure
-    // missed. The set only grows, so this terminates.
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for node in 0..n {
-            if inert[node]
-                || is_hard_effect(&ir.nodes[node].kind)
-                || !ir.nodes[node].defs.is_empty()
-                || ir.nodes[node].uses.is_empty()
-            {
-                continue;
-            }
-            let sources: BTreeSet<NodeId> = graph.uses_defs[node]
-                .iter()
-                .map(|&d| graph.defs[d].node)
-                .collect();
-            if !sources.is_empty() && sources.iter().all(|&s| inert[s]) {
-                inert[node] = true;
-                changed = true;
-            }
-        }
-    }
 
     // --- effects and the backward slice ---------------------------------
     // Distance from the nearest effect, over data and control dependence
@@ -417,14 +463,23 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
     }
 
     // --- per-node tier and score -----------------------------------------
+    let peaks = (
+        graph.influence.iter().copied().max().unwrap_or(0),
+        graph.depends_on.iter().copied().max().unwrap_or(0),
+    );
     let mut nodes = Vec::with_capacity(n);
     for node in 0..n {
         let kind = &ir.nodes[node].kind;
         let mut reasons: Vec<Reason> = Vec::new();
 
         if inert[node] {
+            // Only claim a denylist match when one actually happened. Reporting
+            // every absorbed call as "denylisted call X" told readers the list
+            // matched `response.fp.readline`, which it never did — and a tool
+            // whose selling point is auditable reasons cannot afford a reason
+            // that is false.
             reasons.push(match kind {
-                NodeKind::Call { callee, .. } => Reason::Denylisted {
+                NodeKind::Call { callee, .. } if denylisted[node] => Reason::Denylisted {
                     callee: callee.clone(),
                 },
                 _ => Reason::InertSupport,
@@ -437,11 +492,9 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
                     governed: graph.controls[node].iter().filter(|&&m| m != node).count(),
                 });
             }
-            let carried = graph
-                .defs
+            let carried = graph.defs_at[node]
                 .iter()
-                .enumerate()
-                .any(|(d, site)| site.node == node && graph.is_loop_carried(d));
+                .any(|&d| graph.is_loop_carried(d));
             if carried {
                 reasons.push(Reason::LoopCarried {
                     depth: graph.loop_depth[node],
@@ -460,6 +513,13 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
                     effect: nearest[node].clone(),
                 });
             }
+            let fraction = graph.influence_fraction(node);
+            if fraction >= CORE_INFLUENCE {
+                reasons.push(Reason::HighInfluence {
+                    fraction,
+                    dependents: graph.influence[node],
+                });
+            }
             if reasons.is_empty() {
                 reasons.push(Reason::Unreaching);
             }
@@ -471,7 +531,7 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
             .map(Reason::tier)
             .max()
             .unwrap_or(Tier::Plumbing);
-        let score = score_of(tier, node, &graph, dist[node], weights);
+        let score = score_of(tier, node, kind, &graph, dist[node], peaks, weights);
         nodes.push(NodeSalience {
             node,
             tier,
@@ -484,23 +544,103 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
 }
 
 /// Composes the continuous score from the same facts that drove the tier.
-fn score_of(tier: Tier, node: NodeId, graph: &Graph, dist: Option<u32>, w: &ScoreWeights) -> f64 {
+///
+/// The influence term is what makes this a heatmap rather than four shades.
+/// It is the fraction of the body that transitively depends on the statement,
+/// so it takes as many distinct values as the function has instructions;
+/// proximity, control mass and loop depth each contribute a handful.
+fn score_of(
+    tier: Tier,
+    node: NodeId,
+    kind: &NodeKind,
+    graph: &Graph,
+    dist: Option<u32>,
+    peaks: (u32, u32),
+    w: &ScoreWeights,
+) -> f64 {
     if tier == Tier::Inert {
         return 0.0;
     }
-    let base = match tier {
-        Tier::Core => w.base_core,
-        Tier::Boundary => w.base_boundary,
-        Tier::Plumbing => w.base_plumbing,
-        Tier::Inert => 0.0,
+    // Normalised against the most influential statement in *this* function
+    // rather than against its instruction count. Dividing by size makes every
+    // statement in a large body score near zero — measured, half of all lines
+    // landed within 0.01 of each other — which is the opposite of what a
+    // heatmap needs. Salience is a claim about relative standing inside a body,
+    // so the scale should be the body's own.
+    let (peak_influence, peak_depends) = peaks;
+    let influence = if peak_influence == 0 {
+        0.0
+    } else {
+        w.influence * f64::from(graph.influence[node]) / f64::from(peak_influence)
     };
-    let control = w.control * graph.control_weight(node);
-    let depth = w.loop_depth * f64::from(graph.loop_depth[node].min(3)) / 3.0;
+    let dependency = if peak_depends == 0 {
+        0.0
+    } else {
+        w.dependency * f64::from(graph.depends_on[node]) / f64::from(peak_depends)
+    };
     let proximity = match dist {
         Some(d) => w.proximity / f64::from(d + 1),
         None => 0.0,
     };
-    (base + control + depth + proximity).clamp(0.0, 1.0)
+    let control = w.control * graph.control_weight(node);
+    let depth = w.loop_depth * f64::from(graph.loop_depth[node].min(4)) / 4.0;
+    // A return, throw or state write is observable without looking inside
+    // anything; an opaque call is observable only because we declined to look.
+    // Scoring them apart keeps the frontier ranked below the places behavior
+    // definitively lands.
+    let effect = w.effect
+        * match kind {
+            NodeKind::Return | NodeKind::Throw | NodeKind::StateWrite { .. } => 1.0,
+            NodeKind::Call { .. } => 0.6,
+            NodeKind::Pure | NodeKind::Branch => 0.0,
+        };
+    (influence + dependency + proximity + control + depth + effect).clamp(0.0, 1.0)
+}
+
+/// Whether nobody reads what this node produces.
+///
+/// A node that discards the result — CPython's `POP_TOP`, or a JVM void call
+/// with no defined value — does not count as a reader: it is the bytecode's way
+/// of saying the result was ignored, which is precisely the signal wanted here.
+fn result_discarded(ir: &FunctionIr, graph: &Graph, node: NodeId) -> bool {
+    let mut users: BTreeSet<NodeId> = BTreeSet::new();
+    for &d in &graph.defs_at[node] {
+        users.extend(graph.def_users[d].iter().copied());
+    }
+    users.remove(&node);
+    users
+        .iter()
+        .all(|&u| ir.nodes[u].defs.is_empty() && !ir.nodes[u].kind.is_effect())
+}
+
+/// Every node that can reach one of `seeds` by following def-use *or* control
+/// dependence edges backwards — that is, every statement that contributes to a
+/// seed either by producing a value it consumes or by deciding whether it runs.
+///
+/// Used to decide usefulness, where both kinds of contribution count: a
+/// predicate guarding a network write is as load-bearing as the value written.
+fn useful_closure(graph: &Graph, seeds: impl Iterator<Item = NodeId>) -> Vec<bool> {
+    let mut seen = vec![false; graph.n];
+    let mut q: VecDeque<NodeId> = VecDeque::new();
+    for s in seeds {
+        if !seen[s] {
+            seen[s] = true;
+            q.push_back(s);
+        }
+    }
+    while let Some(node) = q.pop_front() {
+        let sources = graph.uses_defs[node]
+            .iter()
+            .map(|&d| graph.defs[d].node)
+            .chain(graph.ctrl_deps[node].iter().copied());
+        for src in sources {
+            if !seen[src] {
+                seen[src] = true;
+                q.push_back(src);
+            }
+        }
+    }
+    seen
 }
 
 /// Every node that can reach one of `seeds` by following def-use edges
@@ -581,6 +721,15 @@ pub struct LineSpan {
     pub tier: Tier,
     /// Highest score of any instruction in the run.
     pub score: f64,
+    /// Where that score falls among this function's other lines, `0.0..=1.0`.
+    ///
+    /// The absolute score answers "is this line important" against a fixed
+    /// scale, which is what a policy threshold needs. This answers "is this
+    /// line important *for this function*", which is what a heatmap needs — a
+    /// body whose scores all sit near 0.3 still has a most-important line, and
+    /// painting it against the global scale would render the whole function one
+    /// flat colour.
+    pub rank: f64,
     /// Distinct reasons observed across the run, most salient first.
     pub reasons: Vec<String>,
 }
@@ -647,9 +796,20 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
                 end: line,
                 tier,
                 score,
+                rank: 0.0, // filled in below, once every line is known
                 reasons,
             }),
         }
+    }
+    // Rank is assigned after the fact because it is defined against the whole
+    // function: percentile of this span's score among all scored spans, with
+    // ties sharing the lower rank.
+    let mut sorted: Vec<f64> = spans.iter().map(|s| s.score).collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let denom = (sorted.len().saturating_sub(1)).max(1) as f64;
+    for span in &mut spans {
+        let below = sorted.partition_point(|&x| x < span.score);
+        span.rank = ((below as f64) / denom).clamp(0.0, 1.0);
     }
     spans
 }
