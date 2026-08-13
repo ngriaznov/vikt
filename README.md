@@ -30,6 +30,39 @@ identical. `subtotal` reaches a field write, so it is core; `inspected` reaches
 nothing but a log call, so it is inert. No syntactic analysis separates these —
 only dependence does.
 
+## The idea
+
+Every system has elements that matter more than others. In a body, the heart
+matters more than a finger. In a food web there are keystone species; in a
+power grid, critical buses; in a river basin, a mainstem; in a citation
+network, pivotal papers. Each of those fields — ecology, reliability
+engineering, hydrology, control theory, network science — has spent decades
+formalising *which element of this network matters*, with mathematics far more
+developed than anything software engineering has produced for the same
+question about code.
+
+The founding bet of this project is that the symmetry runs deep enough to
+transplant. A function's dependence graph is a small directed network with
+sources (parameters, constants), internal transformation, and sinks (returns,
+writes, calls) — structurally the same object those sciences already study.
+So instead of inventing one more code-specific heuristic, we took the
+importance notion of each mature field, mapped its home network onto the
+dependence graph, implemented it exactly, and measured it against an expert's
+blind per-line judgement.
+
+Two rounds and nineteen transplants later, the bet paid off — but not the way
+a single-winner story would have it. **No transplant wins alone**: the best
+solo algorithm ties a heuristic that reads no code at all. **They win
+together**: each field's notion captures a different *facet* of importance —
+what breaks if deleted, where derivations converge, how deep a value's
+lineage runs, what is a single point of failure — and the facets fail in
+different places. The shipped score is therefore an instrument panel: five
+algorithms from five fields, combined by weights fitted on the expert labels,
+verified on functions the fit never saw. The measurement protocol, and the
+fourteen transplants that lost honestly, are documented below — the failures
+are part of the result. An analogy is not transplanted when the theorem is
+ported; it is transplanted when it survives measurement on the new substrate.
+
 ## Tiers
 
 | tier | meaning |
