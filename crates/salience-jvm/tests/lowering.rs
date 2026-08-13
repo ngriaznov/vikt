@@ -205,6 +205,15 @@ class Processor {
 
     fun mapped(prices: List<Double>): List<Double> = prices.map { it * 2.0 }
 
+    suspend fun suspending(xs: List<Double>): Double {
+        var acc = 0.0
+        for (x in xs) {
+            kotlinx.coroutines.yield()
+            acc += x
+        }
+        return acc
+    }
+
     fun plain(prices: List<Double>): Double {
         var subtotal = 0.0
         for (p in prices) {
@@ -311,5 +320,92 @@ fn kotlin_inlining_class_carries_a_source_map() {
         Some("KotlinDebug"),
         "expected the call-site stratum to be the one used"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `suspend fun` is compiled into a state machine whose dispatch jumps
+/// straight into the middle of the body. That makes the graph irreducible: the
+/// loop header stops dominating the loop tail, and a textbook natural-loop
+/// detector finds nothing.
+///
+/// Measured before the fix, on `kotlinc 2.1.20`: `fetchAndTotal`, a `suspend
+/// fun` whose `for` loop contains a `delay(1)`, reported `natural_loops=0`
+/// against `retreating_edges=1` — the back edge was there, but it was not a
+/// dominator back edge. Every non-suspend method in the same class found its
+/// loop correctly.
+#[test]
+fn a_loop_in_a_suspend_function_is_still_found() {
+    let Some(dir) = compile_kotlin(KOTLIN_SOURCE) else {
+        eprintln!("skipping: kotlinc unavailable");
+        return;
+    };
+    let bytes = std::fs::read(dir.join("out").join("demo").join("Processor.class"))
+        .expect("Processor.class exists");
+    let lowered = salience_jvm::lower_class(&bytes).expect("class parses");
+
+    assert!(
+        lowered.state_machines_excised >= 1,
+        "expected at least one coroutine state machine to be recognised"
+    );
+
+    let suspending = lowered
+        .functions
+        .iter()
+        .find(|f| f.id.name.ends_with("::suspending"))
+        .expect("the suspend function was lowered");
+    let graph = salience_core::Graph::build(suspending);
+    assert_eq!(
+        graph.loops.len(),
+        1,
+        "the source-level `for` loop must survive the state machine; \
+without excision this is 0"
+    );
+
+    // The control case: the same loop shape without `suspend`.
+    let plain = lowered
+        .functions
+        .iter()
+        .find(|f| f.id.name.ends_with("::plain"))
+        .expect("the plain function was lowered");
+    assert_eq!(salience_core::Graph::build(plain).loops.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Excision must not cost the map any source line. The resume-restore blocks it
+/// makes unreachable re-execute lines the normal path also covers, so removing
+/// them should change tiers, never coverage of the file.
+#[test]
+fn excision_does_not_drop_any_source_line() {
+    let Some(dir) = compile_kotlin(KOTLIN_SOURCE) else {
+        eprintln!("skipping: kotlinc unavailable");
+        return;
+    };
+    let bytes = std::fs::read(dir.join("out").join("demo").join("Processor.class"))
+        .expect("Processor.class exists");
+    let lowered = salience_jvm::lower_class(&bytes).expect("class parses");
+
+    let suspending = lowered
+        .functions
+        .iter()
+        .find(|f| f.id.name.ends_with("::suspending"))
+        .expect("the suspend function was lowered");
+
+    // The body spans the `for` and the `return`; every one of those lines must
+    // still appear somewhere in the map.
+    let sal = analyze(suspending, &Denylist::new(), &ScoreWeights::default());
+    let mut side = Sidecar::new("Fixture.kt", "salience-jvm/test");
+    side.push(suspending, &sal);
+    side.finish();
+    let covered: Vec<u32> = side.functions[0]
+        .spans
+        .iter()
+        .flat_map(|s| s.start..=s.end)
+        .collect();
+    assert!(
+        covered.len() >= 4,
+        "expected the suspend body to still be mapped, got {covered:?}"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }

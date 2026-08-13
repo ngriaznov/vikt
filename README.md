@@ -179,7 +179,7 @@ Measured on the same fixture, not inferred:
 |---|---|---|
 | `inline` fun call site | lines past EOF, in a synthetic composite file | **SMAP-resolved to the call site** |
 | stdlib inline (`map`, `let`, …) | lines belonging to another file entirely | **SMAP-resolved; unmappable ones dropped and counted** |
-| `suspend` fun | 128/156 instructions carry a line; the state-machine dispatch carries none | benign — unlined instructions still participate in the graph, they just project nowhere |
+| `suspend` fun | lines stay real and in range, but the dispatch makes the CFG **irreducible** | **state machine excised** — see below |
 | continuation class (`Foo$bar$1`) | zero line information at all | benign — contributes no spans |
 | default arguments | the `$default` bridge is `ACC_SYNTHETIC` but carries a **full** line table duplicating the real method's | **filtered** — otherwise every such line is analyzed twice |
 | data class `equals`/`hashCode`/`copy`/`componentN` | not flagged synthetic, but carry no line table | benign |
@@ -191,6 +191,48 @@ The `$default` case is the one that would have been easy to miss: it is the only
 generated member that carries a *complete* line table, so it looks like real
 code. Filtering `ACC_SYNTHETIC` and `ACC_BRIDGE` is also where JaCoCo landed
 after years of Kotlin coverage bug reports.
+
+### `suspend` breaks dominance, not attribution
+
+The second Kotlin problem is the opposite shape of the first, which is why
+finding one does not warn you about the other. Line numbers in a `suspend fun`
+are **correct and in range**. What breaks is the graph.
+
+A `suspend fun` compiles to a state machine in the same JVM method: the prologue
+reads a `label` off the continuation and dispatches through a `tableswitch`
+whose arms jump straight into the middle of the body, one per suspension point.
+
+```
+node  31  switch %64 { 0 => #005C, 1 => #00D0, 2 => #014A, else => #0165 }
+node 117  goto #008A                                 <- the loop's back edge
+```
+
+Arm `1` enters the loop body without passing the header, so the header stops
+dominating the tail. The back edge is still there, but it is no longer a
+*dominator* back edge — the graph is irreducible. Measured before the fix:
+
+```
+demo/Processor::plain           natural_loops=1   retreating_edges=2
+demo/Processor::usesInline      natural_loops=1   retreating_edges=1
+demo/Processor::fetchAndTotal   natural_loops=0   retreating_edges=1   <-- suspend
+```
+
+A textbook natural-loop detector — which is exactly what the core runs — finds
+**zero loops** in a `suspend` function whose loop contains a suspension point.
+Every loop-carried definition in it goes unreported, and control dependence is
+distorted besides. Given how much modern Kotlin is coroutine code, that is a
+large silent hole.
+
+The fix is JaCoCo's: delete the machine. `crates/salience-jvm/src/coroutine.rs`
+recognises the dispatch by the `IntrinsicsKt::getCOROUTINE_SUSPENDED` call in the
+prologue, prunes every arm but the normal entry, and clears line attribution on
+the resume-restore blocks that pruning makes unreachable — they re-execute lines
+the normal path already covers, so no source line is lost. After excision
+`fetchAndTotal` reports `natural_loops=1`.
+
+Doing this as a **graph rewrite in the frontend** rather than a special case in
+the analysis is deliberate: the language-neutral core still has no idea
+coroutines exist.
 
 ### Reproducing
 
@@ -298,6 +340,15 @@ enters that loop.
 
 ## Known limitations
 
+- **Def-use breaks across a suspension point.** Locals live across an `await`
+  are spilled to and restored from continuation fields (`I$0`, `L$0`, `D$0`),
+  so a value's chain is cut at every suspension. In the demo this surfaces as
+  `reaches state write demo.Processor$fetchAndTotal$1#D$0` — a spill slot being
+  read as real state. Excising the dispatch fixes loops and control dependence
+  but not this; stitching spilled locals back together is the next fix.
+- **`inline` and `suspend` composed is untested.** An inlined `suspend` lambda
+  body is relocated past EOF *and* split across a state machine. Both mechanisms
+  are handled separately; their interaction has no coverage.
 - **Property accessors pile onto the class declaration line.** Kotlin attributes
   every generated getter to the line the class is declared on, so a data class
   with many properties concentrates their salience on one line.
@@ -319,9 +370,10 @@ enters that loop.
 
 ## Tests
 
-36 tests: 17 in the core over hand-built IR (pinning the algorithm rather than
-any frontend's lowering), 7 over real SMAP attribute text, 6 over real `javac -g`
-and `kotlinc` output, 5 over real CPython bytecode, 1 doctest. The JVM and
+42 tests: 17 in the core over hand-built IR (pinning the algorithm rather than
+any frontend's lowering), 11 over real SMAP attribute text and synthetic state
+machines, 8 over real `javac -g` and `kotlinc` output, 5 over real CPython
+bytecode, 1 doctest. The JVM and
 Python suites assert the *same* behavioral claims against equivalent source,
 which is the multi-language claim stated as a test.
 

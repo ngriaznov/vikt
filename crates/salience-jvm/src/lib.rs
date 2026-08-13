@@ -26,6 +26,7 @@
 // not identifiers.
 #![allow(clippy::doc_markdown)]
 
+pub mod coroutine;
 pub mod smap;
 
 use std::collections::BTreeMap;
@@ -36,6 +37,7 @@ use mokapot::jvm::code::ProgramCounter;
 use mokapot::jvm::{Method, method};
 use salience_core::ir::{CallOpacity, FunctionId, FunctionIr, Node, NodeKind, VarId};
 
+use crate::coroutine::excise_state_machine;
 use crate::smap::{Resolution, SourceMap};
 
 /// Something went wrong reading or lowering a class.
@@ -68,6 +70,10 @@ pub struct LoweredClass {
     /// [`smap`] for why reading `LineNumberTable` without it produces spans
     /// pointing past the end of the file.
     pub smap_stratum: Option<String>,
+    /// How many methods were recognised as coroutine state machines and had
+    /// their dispatch excised so that dominance and loop detection see the
+    /// source-level shape. See [`coroutine`].
+    pub state_machines_excised: usize,
     /// How many instructions were dropped because their line belonged to
     /// another source file inlined into this class.
     ///
@@ -107,6 +113,7 @@ pub fn lower_class(bytes: &[u8]) -> Result<LoweredClass, JvmError> {
 
     let mut functions = Vec::new();
     let mut foreign_lines_dropped = 0;
+    let mut state_machines_excised = 0;
     for method in &class.methods {
         if method.body.is_none() {
             continue; // abstract or native: nothing to analyze
@@ -114,9 +121,11 @@ pub fn lower_class(bytes: &[u8]) -> Result<LoweredClass, JvmError> {
         if is_generated(method) {
             continue;
         }
-        if let Some((ir, dropped)) = lower_method(method, &file, &binary_name, source_map.as_ref())
+        if let Some((ir, dropped, excised)) =
+            lower_method(method, &file, &binary_name, source_map.as_ref())
         {
             foreign_lines_dropped += dropped;
+            state_machines_excised += usize::from(excised);
             functions.push(ir);
         }
     }
@@ -133,6 +142,7 @@ pub fn lower_class(bytes: &[u8]) -> Result<LoweredClass, JvmError> {
         source_file,
         binary_name,
         smap_stratum: source_map.as_ref().map(|m| m.stratum().to_owned()),
+        state_machines_excised,
         foreign_lines_dropped,
         functions,
     })
@@ -169,7 +179,7 @@ fn lower_method(
     file: &str,
     owner: &str,
     source_map: Option<&SourceMap>,
-) -> Option<(FunctionIr, usize)> {
+) -> Option<(FunctionIr, usize, bool)> {
     let moka = method.brew().ok()?;
     let body = method.body.as_ref()?;
 
@@ -248,6 +258,11 @@ fn lower_method(
         node.succs.dedup();
     }
 
+    // Rewrite a coroutine state machine into its source shape before anything
+    // downstream computes dominance over it. Left in, its dispatch makes the
+    // graph irreducible and every loop containing a suspension point vanishes.
+    let excision = excise_state_machine(&mut nodes);
+
     let decl_line = nodes.iter().filter_map(|n| n.line).min();
     Some((
         FunctionIr {
@@ -261,6 +276,7 @@ fn lower_method(
             entry: 0,
         },
         foreign,
+        excision.is_state_machine,
     ))
 }
 
