@@ -34,12 +34,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
+use clap::ValueEnum;
 use vikt_core::calibration::{
     MIN_EXECUTED_MUTANTS, MIN_SCORED_LINES, NULL_MARGIN, RHO_FLOOR, Verdict, spearman, verdict,
 };
 use vikt_core::mutant::MutantSet;
 use vikt_core::{
-    Denylist, PanelProfile, ScoreWeights, Scorer, analyze, analyze_with_scorer, project_to_lines,
+    Denylist, FunctionFeatures, FunctionImportance, FunctionIr, PanelProfile, ScopedFunction,
+    ScoreWeights, Scorer, analyze, analyze_with_scorer, project_to_lines,
 };
 
 /// Body-size ceiling, matching the analyze path's `--max-instructions`
@@ -144,6 +146,25 @@ impl Language {
     }
 }
 
+/// How wide a lens the panel score and positional null use when paired
+/// against kill rates. Mirrors `main.rs`'s `Scope` for the analyze path, but
+/// is its own type: this crate has no dependency from `calibrate` back onto
+/// `main`, and the two enums' variants happen to coincide rather than share
+/// an identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+enum Scope {
+    /// Panel score and positional null are both local to each sampled
+    /// function's own extent — today's behavior.
+    #[default]
+    Function,
+    /// Panel score is [`vikt_core::file_scores`]'s call-graph-weighted blend
+    /// across every scored function in the mutated line's file, and the
+    /// positional null is measured over that file's whole scored-line
+    /// extent instead of the one owning function's. Verdict machinery
+    /// (pooled Spearman, thresholds) is unchanged either way.
+    File,
+}
+
 #[derive(Debug, clap::Args)]
 pub struct CalibrateArgs {
     /// Directory of Python and/or JavaScript/TypeScript sources. A tree with
@@ -213,6 +234,15 @@ pub struct CalibrateArgs {
     /// involved.
     #[arg(long, default_value = "python3")]
     pub python: String,
+
+    /// Measure the panel against each sampled line's own function
+    /// (`function`, the default) or against `vikt_core::filescope`'s
+    /// call-graph-weighted blend across its file (`file`). `--emit-dataset`
+    /// rows always carry both the file-scope score and its function
+    /// features regardless of this flag; only the reported correlations and
+    /// verdict change.
+    #[arg(long, value_enum, default_value_t = Scope::Function)]
+    scope: Scope,
 }
 
 /// A function the panel scored, keyed to the copied tree.
@@ -229,6 +259,16 @@ struct ScoredFn {
     /// from the plain `analyze` pass, never from the panel-overwritten
     /// scores: `line_features` documents that contract.
     feats: BTreeMap<u32, [f64; 7]>,
+    /// Owned lowered body and plain (non-panel) tiered analysis, retained
+    /// only so `filescope_layer` can build a [`ScopedFunction`] over every
+    /// scored function of a file at once, after scoring has otherwise
+    /// finished with them.
+    ir: FunctionIr,
+    importance: FunctionImportance,
+    /// Panel score per scored line — the same values folded into
+    /// `file_scores`' per-file max, kept per-function here for
+    /// [`ScopedFunction::line_scores`].
+    line_scores: BTreeMap<u32, f64>,
 }
 
 /// Highest panel score per line, per file — the same "most salient span
@@ -378,6 +418,21 @@ repository's own type check is read as killed, indistinguishable from one an act
         sampled.len()
     );
 
+    // Only built when something will read it: `--scope file` needs it for
+    // the verdict, `--emit-dataset` needs it for every row regardless of
+    // scope. Computed over every scored function, not just the sample — an
+    // unsampled sibling still shapes its file's call graph.
+    let filescope = if args.scope == Scope::File || args.emit_dataset.is_some() {
+        filescope_layer(&scored)
+    } else {
+        Filescope::default()
+    };
+    if args.scope == Scope::File {
+        println!(
+            "calibrate: scope file — panel score and positional null measured against the file's call-graph-weighted blend, not each function alone"
+        );
+    }
+
     let (mutants, candidates, invalid_discarded) =
         generate_mutants(&copy.root, sampled, lang, args, budget)?;
     if invalid_discarded > 0 {
@@ -413,10 +468,10 @@ repository's own type check is read as killed, indistinguishable from one an act
         );
     }
 
-    let pairs = pair_lines(sampled, &file_scores, &tally);
+    let pairs = pair_lines(sampled, &file_scores, &filescope.scores, args.scope, &tally);
     let v = judge(sampled, &pairs, &tally);
     if let Some(path) = &args.emit_dataset {
-        let rows = write_dataset(path, &args.path, lang, sampled, &pairs, &tally)?;
+        let rows = write_dataset(path, &args.path, lang, sampled, &pairs, &tally, &filescope)?;
         println!("dataset: wrote {rows} rows to {}", path.display());
     }
     Ok(if args.gate {
@@ -604,9 +659,11 @@ fn score_functions(
         let feats = vikt_core::panel::line_features(ir, &base, &Denylist::new());
         let per_file = file_scores.entry(rel.to_path_buf()).or_default();
         let mut lines = 0;
+        let mut line_scores = BTreeMap::new();
         for s in &spans {
             for ln in s.start..=s.end {
                 lines += 1;
+                line_scores.insert(ln, s.score);
                 let e = per_file.entry(ln).or_insert(f64::MIN);
                 if s.score > *e {
                     *e = s.score;
@@ -620,8 +677,56 @@ fn score_functions(
             hi,
             lines,
             feats,
+            ir: ir.clone(),
+            importance: base,
+            line_scores,
         });
     }
+}
+
+/// The file-scope function-importance layer, computed once and threaded
+/// through pairing and dataset writing together, so both stay in lockstep
+/// without pushing the argument count of either past clippy's limit.
+#[derive(Default)]
+struct Filescope {
+    /// Blended per-line score, file by file — parallel in shape to
+    /// [`FileScores`].
+    scores: FileScores,
+    /// Parallel to the `scored` slice `filescope_layer` was built from:
+    /// each function's own four call-graph features.
+    features: Vec<FunctionFeatures>,
+}
+
+/// Builds the file-scope layer, grouped by file so a line is never blended
+/// against a sibling in a different source file. Runs over every scored
+/// function, not only the sample: an unsampled sibling still shapes the
+/// call graph its sampled neighbours are ranked against.
+fn filescope_layer(scored: &[ScoredFn]) -> Filescope {
+    let mut by_file: BTreeMap<&Path, Vec<usize>> = BTreeMap::new();
+    for (i, f) in scored.iter().enumerate() {
+        by_file.entry(&f.file).or_default().push(i);
+    }
+    let mut layer = Filescope {
+        features: vec![FunctionFeatures::default(); scored.len()],
+        ..Filescope::default()
+    };
+    for (file, idxs) in by_file {
+        let functions: Vec<ScopedFunction<'_>> = idxs
+            .iter()
+            .map(|&i| ScopedFunction {
+                ir: &scored[i].ir,
+                importance: &scored[i].importance,
+                line_scores: &scored[i].line_scores,
+            })
+            .collect();
+        for (&i, feat) in idxs.iter().zip(vikt_core::function_features(&functions)) {
+            layer.features[i] = feat;
+        }
+        layer
+            .scores
+            .insert(file.to_path_buf(), vikt_core::file_scores(&functions));
+    }
+    layer
 }
 
 /// Generates line-targeted mutants for the sampled functions, file by file
@@ -796,7 +901,21 @@ struct PairedLine {
 /// function containing it, so nested defs do not inherit their parent's
 /// extent for the null; lines without a panel score are excluded here, which
 /// keeps the dataset and the verdict measuring the identical set.
-fn pair_lines(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Vec<PairedLine> {
+///
+/// Under [`Scope::Function`] `panel`/`null` are exactly as before: the
+/// owning sampled function's own score and positional extent. Under
+/// [`Scope::File`] both come from `filescope` instead — the call-graph
+/// blended score, and the positional null measured over the whole file's
+/// scored-line extent rather than one function's. `owner` (used for
+/// per-function reporting and the dataset's function features) is found the
+/// same way either way.
+fn pair_lines(
+    sampled: &[ScoredFn],
+    file_scores: &FileScores,
+    filescope: &FileScores,
+    scope: Scope,
+    tally: &Tally,
+) -> Vec<PairedLine> {
     let mut pairs = Vec::new();
     let mut unscored = 0usize;
     for ((file, line), (kills, total)) in &tally.per_line {
@@ -806,22 +925,44 @@ fn pair_lines(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> 
             .filter(|(_, f)| &f.file == file && f.lo <= *line && *line <= f.hi)
             .min_by_key(|(_, f)| f.hi - f.lo)
             .map(|(i, _)| i);
-        let score = file_scores.get(file).and_then(|m| m.get(line));
-        let (Some(owner), Some(&score)) = (owner, score) else {
+        let panel_score = match scope {
+            Scope::Function => file_scores.get(file).and_then(|m| m.get(line)),
+            Scope::File => filescope.get(file).and_then(|m| m.get(line)),
+        };
+        let (Some(owner), Some(&panel_score)) = (owner, panel_score) else {
             unscored += 1;
             continue;
         };
-        let f = &sampled[owner];
-        let null = if f.hi > f.lo {
-            1.0 - f64::from(line - f.lo) / f64::from(f.hi - f.lo)
-        } else {
-            1.0
+        let null = match scope {
+            Scope::Function => {
+                let f = &sampled[owner];
+                if f.hi > f.lo {
+                    1.0 - f64::from(line - f.lo) / f64::from(f.hi - f.lo)
+                } else {
+                    1.0
+                }
+            }
+            Scope::File => {
+                let extent = filescope
+                    .get(file)
+                    .expect("filescope carries this file: `panel_score` above matched against it");
+                let file_lo = *extent
+                    .keys()
+                    .next()
+                    .expect("non-empty: `panel_score` above matched a line in it");
+                let file_hi = *extent.keys().next_back().unwrap_or(&file_lo);
+                if file_hi > file_lo {
+                    1.0 - f64::from(line - file_lo) / f64::from(file_hi - file_lo)
+                } else {
+                    1.0
+                }
+            }
         };
         pairs.push(PairedLine {
             file: file.clone(),
             line: *line,
             owner,
-            panel: score,
+            panel: panel_score,
             null,
             kills: *kills,
             total: *total,
@@ -906,6 +1047,9 @@ fn judge(sampled: &[ScoredFn], pairs: &[PairedLine], tally: &Tally) -> Verdict {
 /// The `--emit-dataset` row: one mutated, panel-scored line. Serialized as
 /// JSONL in struct-field order; the `instruments` keys are the panel's
 /// feature order and refit tooling depends on exactly these seven.
+/// `function_features` and `file_score` are additive: present regardless of
+/// `--scope`, since they measure the file-scope layer independently of
+/// which scope the run's own verdict used.
 #[derive(serde::Serialize)]
 struct DatasetRow<'a> {
     root: String,
@@ -919,6 +1063,8 @@ struct DatasetRow<'a> {
     mutants: usize,
     killed: usize,
     kill_rate: f64,
+    function_features: FunctionFeaturesRow,
+    file_score: f64,
 }
 
 /// The seven panel features by name, in weight order.
@@ -933,8 +1079,32 @@ struct Instruments {
     boundary: u8,
 }
 
+/// `vikt_core::filescope`'s four rank-normalised call-graph signals for the
+/// row's own function, under their dataset names.
+#[derive(serde::Serialize)]
+struct FunctionFeaturesRow {
+    trophic: f64,
+    fan_in: f64,
+    size_share: f64,
+    boundary_density: f64,
+}
+
+impl From<FunctionFeatures> for FunctionFeaturesRow {
+    fn from(f: FunctionFeatures) -> Self {
+        Self {
+            trophic: f.trophic,
+            fan_in: f.fan_in,
+            size_share: f.size_share,
+            boundary_density: f.boundary_density,
+        }
+    }
+}
+
 /// Writes the dataset: every paired line, sorted by (file, function, line),
 /// one JSON object per line, overwriting `path`. Returns the row count.
+/// `filescope` is the file-scope layer over every scored function
+/// ([`filescope_layer`]), computed independently of `--scope` — a dataset
+/// row always carries both its blended score and its function features.
 fn write_dataset(
     path: &Path,
     target: &Path,
@@ -942,6 +1112,7 @@ fn write_dataset(
     sampled: &[ScoredFn],
     pairs: &[PairedLine],
     _tally: &Tally,
+    filescope: &Filescope,
 ) -> Result<usize, Box<dyn Error>> {
     let profile = match lang.panel_profile() {
         PanelProfile::Instruction => "instruction",
@@ -960,7 +1131,13 @@ fn write_dataset(
         let f = &sampled[pl.owner];
         // A line whose owning function carries no feature vector for it
         // (projection edge cases) is excluded, mirroring the rho exclusion.
+        // Same treatment for a missing file-scope score, which should not
+        // happen once `filescope.scores` covers every scored function, but
+        // a silent skip beats a panicking index either way.
         let Some(feats) = f.feats.get(&pl.line) else {
+            continue;
+        };
+        let Some(&file_score) = filescope.scores.get(&pl.file).and_then(|m| m.get(&pl.line)) else {
             continue;
         };
         let row = DatasetRow {
@@ -983,6 +1160,8 @@ fn write_dataset(
             mutants: pl.total,
             killed: pl.kills,
             kill_rate: pl.kills as f64 / pl.total as f64,
+            function_features: filescope.features[pl.owner].into(),
+            file_score,
         };
         out.push_str(&serde_json::to_string(&row)?);
         out.push('\n');

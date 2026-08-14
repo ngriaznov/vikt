@@ -111,30 +111,71 @@ pub fn file_scores(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, f64> {
     lines.into_iter().zip(rank01(&raw)).collect()
 }
 
-/// Per-function call-graph weight, parallel to `functions`: the mean of four
-/// rank-normalised features (call-graph depth, fan-in, size share, boundary
-/// density). Exposed separately from [`file_scores`] so calibration and the
-/// dataset writer can pair a function's own weight with its features.
+/// A function's four rank-normalised call-graph signals, individually —
+/// [`function_weights`]'s per-function mean, broken apart so calibration and
+/// the dataset writer can report or refit them separately.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FunctionFeatures {
+    /// Call-graph depth: the unweighted analogue of [`crate::trophic`]'s
+    /// per-statement derivation depth, rank-normalised.
+    pub trophic: f64,
+    /// Distinct-caller count, rank-normalised.
+    pub fan_in: f64,
+    /// Scored-line count, rank-normalised.
+    pub size_share: f64,
+    /// Fraction of scored lines at [`Tier::Boundary`], rank-normalised.
+    pub boundary_density: f64,
+}
+
+impl FunctionFeatures {
+    /// The mean of the four signals — [`function_weights`]'s value for this
+    /// function.
+    #[must_use]
+    pub fn mean(self) -> f64 {
+        (self.trophic + self.fan_in + self.size_share + self.boundary_density) / 4.0
+    }
+}
+
+/// Per-function call-graph features, parallel to `functions`: call-graph
+/// depth, fan-in, size share and boundary density, each rank-normalised to
+/// `[0, 1]` across `functions`.
 #[must_use]
-pub fn function_weights(functions: &[ScopedFunction<'_>]) -> Vec<f64> {
+pub fn function_features(functions: &[ScopedFunction<'_>]) -> Vec<FunctionFeatures> {
     let n = functions.len();
     if n == 0 {
         return Vec::new();
     }
     let edges = resolve_edges(functions);
 
-    let depth = rank01(&trophic_levels(&edges));
-    let fanin = rank01(&fan_in(&edges));
+    let trophic = rank01(&trophic_levels(&edges));
+    let fan_in = rank01(&fan_in(&edges));
     let size: Vec<f64> = functions
         .iter()
         .map(|f| f.line_scores.len() as f64)
         .collect();
-    let size = rank01(&size);
+    let size_share = rank01(&size);
     let boundary: Vec<f64> = functions.iter().map(boundary_density).collect();
-    let boundary = rank01(&boundary);
+    let boundary_density = rank01(&boundary);
 
     (0..n)
-        .map(|i| (depth[i] + fanin[i] + size[i] + boundary[i]) / 4.0)
+        .map(|i| FunctionFeatures {
+            trophic: trophic[i],
+            fan_in: fan_in[i],
+            size_share: size_share[i],
+            boundary_density: boundary_density[i],
+        })
+        .collect()
+}
+
+/// Per-function call-graph weight, parallel to `functions`: the mean of four
+/// rank-normalised features ([`FunctionFeatures`]). Exposed separately from
+/// [`file_scores`] so calibration and the dataset writer can pair a
+/// function's own weight with its features.
+#[must_use]
+pub fn function_weights(functions: &[ScopedFunction<'_>]) -> Vec<f64> {
+    function_features(functions)
+        .into_iter()
+        .map(FunctionFeatures::mean)
         .collect()
 }
 

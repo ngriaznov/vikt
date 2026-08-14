@@ -27,5 +27,16 @@ class ClampTest(unittest.TestCase):
         self.assertEqual(mathops.clamp_scores([101, -1, 50]), [100, 0, 50])
 
 
+class TotalWithTaxTest(unittest.TestCase):
+    def test_adds_percentage_tax_to_checkout(self):
+        self.assertEqual(mathops.total_with_tax([5, 3], [2, 1], 10), 14)
+        self.assertEqual(mathops.total_with_tax([], [], 20), 0)
+        # tax_percent 0 recovers checkout exactly: kills a `+` -> `-` mutant
+        # on the final line and confirms tax is added, not substituted.
+        self.assertEqual(mathops.total_with_tax([10], [9], 0), 90)
+        # The remainder matters: kills a `//` -> `/` mutant on the tax line.
+        self.assertEqual(mathops.total_with_tax([10], [9], 15), 103)
+
+
 if __name__ == "__main__":
     unittest.main()

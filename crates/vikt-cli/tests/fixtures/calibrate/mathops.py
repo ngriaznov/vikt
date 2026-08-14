@@ -34,3 +34,14 @@ def clamp_scores(scores):
             value = 100
         out.append(value)
     return out
+
+
+def total_with_tax(prices, quantities, tax_percent):
+    """A thin wrapper around checkout, so the file's call graph has a hub
+    (checkout, called from here) and not just two unrelated functions —
+    the shape calibrate's --scope file test needs."""
+    channel_tag = "pos"
+    audit_batch = 2 * 3
+    subtotal = checkout(prices, quantities)
+    tax = subtotal * tax_percent // 100
+    return subtotal + tax

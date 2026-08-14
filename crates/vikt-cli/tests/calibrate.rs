@@ -99,6 +99,39 @@ fn calibrates_the_fixture_and_leaves_it_untouched() {
     );
 }
 
+/// `--scope file`: the run completes, announces the file-scope notice, and
+/// still reaches a verdict. `mathops.py`'s `total_with_tax` wraps `checkout`
+/// for exactly this — a hub called by a wrapper in the same file — so the
+/// file-scope call graph has an edge to weight functions by, not just two
+/// functions with nothing between them.
+#[test]
+fn scope_file_runs_and_announces_itself() {
+    if !python_available() {
+        eprintln!("skipping: python3 not on PATH");
+        return;
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args([
+            "calibrate",
+            FIXTURE,
+            "--test-cmd",
+            "python3 -m unittest discover",
+            "--scope",
+            "file",
+        ])
+        .output()
+        .expect("running the vikt binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        stdout.contains("scope file"),
+        "the file-scope notice must be printed:\n{stdout}"
+    );
+    assert!(stdout.contains("pooled Spearman rho"), "stdout:\n{stdout}");
+    assert!(stdout.contains("verdict:"), "stdout:\n{stdout}");
+}
+
 /// Starving the run of budget lands under the mutant floor, and with `--gate`
 /// that is exit code 2: "not enough data" is a different answer from
 /// "uncalibrated" (3), and a CI job must be able to tell them apart.
@@ -359,6 +392,33 @@ fn emit_dataset_writes_consistent_jsonl() {
         assert!((0.0..=1.0).contains(&panel));
         assert_eq!(row["language"], "python");
         assert_eq!(row["profile"], "instruction");
+
+        // Additive fields: present regardless of `--scope`, which this run
+        // never passed.
+        let features = row["function_features"]
+            .as_object()
+            .expect("function_features is an object");
+        let mut feature_keys: Vec<_> = features.keys().map(String::as_str).collect();
+        feature_keys.sort_unstable();
+        assert_eq!(
+            feature_keys,
+            ["boundary_density", "fan_in", "size_share", "trophic"],
+            "exactly the four filescope function features"
+        );
+        for key in ["boundary_density", "fan_in", "size_share", "trophic"] {
+            let v = features[key]
+                .as_f64()
+                .unwrap_or_else(|| panic!("function_features.{key} is a number"));
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "function_features.{key} = {v} out of [0, 1]"
+            );
+        }
+        let file_score = row["file_score"].as_f64().expect("file_score is a number");
+        assert!(
+            (0.0..=1.0).contains(&file_score),
+            "file_score {file_score} out of [0, 1]"
+        );
         let key = (
             row["file"].as_str().unwrap().to_owned(),
             row["function"].as_str().unwrap().to_owned(),
