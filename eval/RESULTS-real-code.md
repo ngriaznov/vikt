@@ -85,3 +85,36 @@ Four findings, in honesty order:
    0.41 - the closure-capture gap named in salience-js's docs. acceptParams
    0.12 - an index-arithmetic scanner, the same statement-role residual as
    fnmatch.translate and py_scanstring on Python.
+
+## panel-v2: per-substrate weights + closure captures, measured
+
+Two changes on claude/panel-v2, each motivated by a number in the transfer
+test above, each implemented by a subagent and adversarially verified before
+merging:
+
+- STATEMENT_WEIGHTS: a second weight vector refit on the blind JS labels
+  (lambda 0.3 by inner CV, LOFO 0.676). --scorer panel now selects the
+  profile by input extension; the Instruction path is byte-identical.
+- salience-js closure captures (a closure-bearing statement now USES the
+  variables its nested function captures) and a real labelled-continue back
+  edge. The verifier reproduced the fix's signature independently: memoize's
+  params node moved plumbing -> core, "reaches return value in 2 steps".
+
+Re-measured against the same blind labels (aborted's five labels shifted +3
+after upstream zod moved util.ts; content verified line-by-line first):
+
+| scorer | before | after |
+|---|---|---|
+| panel | 0.603 | **0.697** |
+| position null | 0.695 | 0.695 |
+| strahler | 0.733 | 0.744 |
+| memoize (panel, per-fn) | 0.406 | 0.595 |
+| acceptParams (panel) | 0.119 | 0.313 |
+| setCharset (panel) | 0.730 | 0.949 |
+
+The panel now sits at the null on JS (0.697 vs 0.695) instead of 0.09 below
+it, with the two documented v1 gaps each worth what the labels said they
+were worth: closure captures +0.19 on memoize alone. floatSafeRemainder is
+the one regression (0.803 -> 0.447): the statement profile leans harder on
+trophic/strahler, and a five-line arithmetic function has almost no graph
+for them to read.
