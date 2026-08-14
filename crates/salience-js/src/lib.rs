@@ -27,6 +27,17 @@
 //! (`Math`, `console`, anything ambient) get per-name variable ids so flows
 //! through globals are still flows.
 //!
+//! # Closure captures
+//!
+//! A unit whose span contains a nested function - `const f = () => ...`, a
+//! function expression, a `function` declaration - gains, as uses, every
+//! symbol that function's full span (params included, transitively through
+//! any function nested inside *it*) references but does not itself bind.
+//! That is what puts a captured parameter on the def-use chain to whatever
+//! the closure returns, instead of leaving it dangling: `memoize`'s returned
+//! closure now depends on `func` and `resolver` the same way it would if the
+//! call were inlined.
+//!
 //! # Control flow
 //!
 //! `if`/`while`/`do`/`for`/`for-in`/`for-of`/`switch` (with fallthrough),
@@ -42,15 +53,10 @@
 //!
 //! # Known v1 simplifications
 //!
-//! - A closure value (`const f = () => ...`) is a plain definition of `f`;
-//!   the variables it captures are not recorded as uses of the closure node.
-//!   The nested body is lowered as its own function either way.
 //! - `finally` runs once, after the `try` exits, rather than being duplicated
 //!   along every exit path.
 //! - Logical short-circuits (`&&`, `||`, `??`, `?:`) stay inside their
 //!   statement node rather than becoming branches - statement granularity.
-//! - A labelled `continue` is lowered as a terminal node rather than a back
-//!   edge; labelled `break` is exact.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -215,6 +221,12 @@ struct Facts<'a> {
     /// Body spans of all nested functions - references inside them belong to
     /// the nested function, never to an enclosing unit.
     fn_spans: Vec<Span>,
+    /// Full spans of all nested functions, params included - unlike
+    /// `fn_spans` these cover the parameter list too, which is where a
+    /// closure's captured symbols get attributed. Used to enrich an
+    /// enclosing unit's uses with the closure's captures - see "Closure
+    /// captures" in the module docs.
+    full_spans: Vec<Span>,
     /// `BindingIdentifier`s: declarations, params, catch params.
     bindings: Vec<(Span, u32)>,
 }
@@ -226,6 +238,7 @@ impl<'a> Facts<'a> {
         let mut calls = Vec::new();
         let mut functions: Vec<FnFact<'a>> = Vec::new();
         let mut fn_spans = Vec::new();
+        let mut full_spans = Vec::new();
         let bindings = bindings_snapshot(semantic);
 
         for node in semantic.nodes() {
@@ -264,14 +277,13 @@ impl<'a> Facts<'a> {
                             param_defs: param_keys(f.span, body.span, &bindings),
                         });
                         fn_spans.push(body.span);
+                        full_spans.push(f.span);
                     }
                 }
                 AstKind::ArrowFunctionExpression(f) => {
                     let body_span = f.body.span();
                     let b = match &f.body {
-                        ast::ArrowFunctionBody::FunctionBody(fb) => {
-                            FnBody::Block(&fb.statements)
-                        }
+                        ast::ArrowFunctionBody::FunctionBody(fb) => FnBody::Block(&fb.statements),
                         expr_body => match expr_body.as_expression() {
                             Some(e) => FnBody::Expr(e),
                             None => continue,
@@ -284,6 +296,7 @@ impl<'a> Facts<'a> {
                         param_defs: param_keys(f.span, body_span, &bindings),
                     });
                     fn_spans.push(body_span);
+                    full_spans.push(f.span);
                 }
                 _ => {}
             }
@@ -296,6 +309,7 @@ impl<'a> Facts<'a> {
             calls,
             functions,
             fn_spans,
+            full_spans,
             bindings,
         }
     }
@@ -310,6 +324,59 @@ impl<'a> Facts<'a> {
                 && inner.start >= f.start
                 && inner.end <= f.end
         })
+    }
+
+    /// The outermost nested-function full spans lying strictly inside
+    /// `span`: every entry of `full_spans` contained in `span` that is not
+    /// itself contained in another such entry. A capture set computed over
+    /// one of these already covers everything referenced by functions nested
+    /// inside it, so callers never need to descend further.
+    fn nested_fn_full_spans(&self, span: Span) -> Vec<Span> {
+        let mut candidates: Vec<Span> = self
+            .full_spans
+            .iter()
+            .copied()
+            .filter(|f| f.start >= span.start && f.end <= span.end && *f != span)
+            .collect();
+        candidates.sort_by_key(|s| (s.start, std::cmp::Reverse(s.end)));
+        let mut outermost: Vec<Span> = Vec::new();
+        for f in candidates {
+            let nested = outermost
+                .iter()
+                .any(|o| f.start >= o.start && f.end <= o.end);
+            if !nested {
+                outermost.push(f);
+            }
+        }
+        outermost
+    }
+
+    /// A function's captured symbols: every `Sym` reference inside `full`
+    /// (its full span, params included, transitively through any function
+    /// nested inside it) whose defining `BindingIdentifier` lies outside
+    /// `full`. `Global` keys are never captures - an ambient name is not
+    /// closed over, it is just looked up again wherever it is read.
+    fn captures(&self, full: Span) -> Vec<SymbolKey> {
+        let mut out: Vec<SymbolKey> = Vec::new();
+        for r in &self.refs {
+            if r.span.start < full.start || r.span.end > full.end {
+                continue;
+            }
+            let SymbolKey::Sym(sid) = r.key else {
+                continue;
+            };
+            let bound_inside = self.bindings.iter().any(|(bspan, bsid)| {
+                *bsid == sid && bspan.start >= full.start && bspan.end <= full.end
+            });
+            if bound_inside {
+                continue;
+            }
+            let key = SymbolKey::Sym(sid);
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        }
+        out
     }
 }
 
@@ -419,6 +486,10 @@ struct FnLowerer<'f, 'a> {
     vars: BTreeMap<SymbolKey, VarId>,
     next_temp: u32,
     loops: Vec<LoopCtx>,
+    /// Set by `LabeledStatement` just before delegating to a loop body;
+    /// taken by that loop's own arm when it pushes its `LoopCtx`, so the
+    /// label rides along on the real loop context instead of a proxy one.
+    pending_label: Option<String>,
 }
 
 impl<'f, 'a> FnLowerer<'f, 'a> {
@@ -441,6 +512,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
             vars: BTreeMap::new(),
             next_temp: 0,
             loops: Vec::new(),
+            pending_label: None,
         }
     }
 
@@ -504,6 +576,25 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
         });
     }
 
+    /// Adds `full`'s captured symbols (see `Facts::captures`) to `uses`,
+    /// interning each into this function's variable space.
+    fn add_captures_of(&mut self, full: Span, uses: &mut Vec<VarId>) {
+        for key in self.facts.captures(full) {
+            let v = self.var(key);
+            if !uses.contains(&v) {
+                uses.push(v);
+            }
+        }
+    }
+
+    /// Enriches `uses` with the captures of every nested function directly
+    /// contained in `span` - the closure-capture rule from the module docs.
+    fn add_capture_uses(&mut self, span: Span, uses: &mut Vec<VarId>) {
+        for full in self.facts.nested_fn_full_spans(span) {
+            self.add_captures_of(full, uses);
+        }
+    }
+
     /// Emits extracted call nodes for `span` and computes the containing
     /// unit's uses. Returns (uses, call node ids in evaluation order).
     fn unit_uses(&mut self, span: Span) -> (Vec<VarId>, Vec<usize>) {
@@ -558,6 +649,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
                     uses.push(*t);
                 }
             }
+            self.add_capture_uses(*cspan, &mut uses);
             let temp = self.temp();
             let line = self.line_of(cspan.start);
             let id = self.push(Node {
@@ -611,6 +703,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
                 uses.push(*t);
             }
         }
+        self.add_capture_uses(span, &mut uses);
         (uses, call_nodes)
     }
 
@@ -637,9 +730,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
             .bindings
             .iter()
             .filter(|(s, _)| {
-                s.start >= span.start
-                    && s.end <= span.end
-                    && !self.facts.inside_nested_fn(*s, span)
+                s.start >= span.start && s.end <= span.end && !self.facts.inside_nested_fn(*s, span)
             })
             .map(|(_, sid)| *sid)
             .collect();
@@ -798,7 +889,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
                 let (entry, cond) = self.unit(w.test.span(), NodeKind::Branch, vec![]);
                 self.link(&open, entry);
                 self.loops.push(LoopCtx {
-                    label: None,
+                    label: self.pending_label.take(),
                     continue_target: Some(entry),
                     breaks: vec![],
                     continues: vec![],
@@ -813,7 +904,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
             Statement::DoWhileStatement(d) => {
                 let body_entry_marker = self.nodes.len();
                 self.loops.push(LoopCtx {
-                    label: None,
+                    label: self.pending_label.take(),
                     continue_target: None,
                     breaks: vec![],
                     continues: vec![],
@@ -864,7 +955,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
                 };
                 self.link(&open, centry);
                 self.loops.push(LoopCtx {
-                    label: None,
+                    label: self.pending_label.take(),
                     continue_target: None,
                     breaks: vec![],
                     continues: vec![],
@@ -989,44 +1080,44 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
             Statement::LabeledStatement(l) => {
                 let label = l.label.name.to_string();
                 match &l.body {
+                    // Loop bodies carry the label on their own `LoopCtx`
+                    // (taken from `pending_label` when they push it), so a
+                    // labelled `continue`/`break` resolves through
+                    // `take_continue`/`take_break` exactly like an
+                    // unlabelled one - no proxy context needed.
                     Statement::WhileStatement(_)
                     | Statement::DoWhileStatement(_)
                     | Statement::ForStatement(_)
                     | Statement::ForInStatement(_)
                     | Statement::ForOfStatement(_) => {
-                        self.loops.push(LoopCtx {
-                            label: Some(label),
-                            continue_target: None,
-                            breaks: vec![],
-                            continues: vec![],
-                        });
-                        let mut exits = self.lower_stmt(&l.body, open);
-                        let ctx = self.loops.pop().expect("label ctx");
-                        exits.extend(ctx.breaks);
-                        // Labelled continues: v1 leaves them terminal (see
-                        // module docs) - they neither fall through nor break.
-                        exits
+                        self.pending_label = Some(label);
+                        self.lower_stmt(&l.body, open)
                     }
                     _ => self.lower_stmt(&l.body, open),
                 }
             }
             Statement::FunctionDeclaration(f) => {
-                let defs = f
-                    .id
-                    .as_ref()
-                    .and_then(|id| id.symbol_id.get())
-                    .map(|s| {
-                        let v =
-                            self.var(SymbolKey::Sym(u32::try_from(s.index()).unwrap_or(u32::MAX)));
-                        vec![v]
-                    })
-                    .unwrap_or_default();
+                let defs =
+                    f.id.as_ref()
+                        .and_then(|id| id.symbol_id.get())
+                        .map(|s| {
+                            let v = self
+                                .var(SymbolKey::Sym(u32::try_from(s.index()).unwrap_or(u32::MAX)));
+                            vec![v]
+                        })
+                        .unwrap_or_default();
+                // A declared function's captures are read when the
+                // declaration binds - same enrichment as a closure value,
+                // rooted at the function's own full span rather than an
+                // enclosing unit's.
+                let mut uses: Vec<VarId> = Vec::new();
+                self.add_captures_of(f.span, &mut uses);
                 let line = self.line_of(f.span.start);
                 let id = self.push(Node {
                     line: Some(line),
                     kind: NodeKind::Pure,
                     defs,
-                    uses: vec![],
+                    uses,
                     succs: vec![],
                     label: "<fndecl>".into(),
                 });
@@ -1034,16 +1125,15 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
                 vec![id]
             }
             Statement::ClassDeclaration(c) => {
-                let defs = c
-                    .id
-                    .as_ref()
-                    .and_then(|id| id.symbol_id.get())
-                    .map(|s| {
-                        let v =
-                            self.var(SymbolKey::Sym(u32::try_from(s.index()).unwrap_or(u32::MAX)));
-                        vec![v]
-                    })
-                    .unwrap_or_default();
+                let defs =
+                    c.id.as_ref()
+                        .and_then(|id| id.symbol_id.get())
+                        .map(|s| {
+                            let v = self
+                                .var(SymbolKey::Sym(u32::try_from(s.index()).unwrap_or(u32::MAX)));
+                            vec![v]
+                        })
+                        .unwrap_or_default();
                 let line = self.line_of(c.span.start);
                 let id = self.push(Node {
                     line: Some(line),
@@ -1123,7 +1213,7 @@ impl<'f, 'a> FnLowerer<'f, 'a> {
         };
         self.link(&open, entry);
         self.loops.push(LoopCtx {
-            label: None,
+            label: self.pending_label.take(),
             continue_target: Some(cond),
             breaks: vec![],
             continues: vec![],
