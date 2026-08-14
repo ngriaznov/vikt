@@ -92,6 +92,7 @@ pub mod trophic;
 pub use artifact::{Sidecar, SpanRecord};
 pub use graph::Graph;
 pub use ir::{FunctionId, FunctionIr, IrError, Node, NodeKind};
+pub use panel::PanelProfile;
 pub use salience::{
     Denylist, FunctionSalience, LineSpan, NodeSalience, Reason, ScoreWeights, Scorer, Tier,
     analyze, analyze_with_scorer, project_to_lines,

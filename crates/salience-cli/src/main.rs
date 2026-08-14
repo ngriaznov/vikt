@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
 use salience_core::ir::FunctionIr;
-use salience_core::{Denylist, ScoreWeights, Scorer, Sidecar, analyze_with_scorer};
+use salience_core::{Denylist, PanelProfile, ScoreWeights, Scorer, Sidecar, analyze_with_scorer};
 
 /// Output shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -90,9 +90,12 @@ struct Args {
 /// CLI surface of [`Scorer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ScorerArg {
-    /// The fitted five-instrument combination - the shipped default. Held-out
-    /// Spearman 0.517 against blind expert labels; see salience-core's
-    /// `panel` module for provenance.
+    /// The fitted five-instrument combination - the shipped default. Which
+    /// of the two fitted weight vectors is used is substrate-selected
+    /// automatically from the input's extension, not a flag: bytecode
+    /// inputs (.class, .py) get the instruction-granular fit, JS/TS inputs
+    /// get the statement-granular fit. See salience-core's `panel` module
+    /// for provenance of both.
     Panel,
     /// The incumbent hand-tuned blend, alone.
     Current,
@@ -106,16 +109,31 @@ enum ScorerArg {
     Strahler,
 }
 
-impl From<ScorerArg> for Scorer {
-    fn from(a: ScorerArg) -> Self {
-        match a {
-            ScorerArg::Panel => Scorer::Panel,
-            ScorerArg::Current => Scorer::Current,
-            ScorerArg::Schur => Scorer::Schur,
-            ScorerArg::Pivot => Scorer::Pivot,
-            ScorerArg::Trophic => Scorer::Trophic,
-            ScorerArg::Strahler => Scorer::Strahler,
-        }
+/// Resolves the CLI's flat `--scorer` choice to a [`Scorer`], consulting the
+/// input extension only for [`ScorerArg::Panel`]: that's the one variant
+/// whose weight vector depends on the dependence-graph granularity the
+/// frontend produces (see [`PanelProfile`]). Every other variant is a single
+/// instrument with no substrate-specific fit, so the extension is unused for
+/// them.
+fn resolve_scorer(arg: ScorerArg, ext: &str) -> Scorer {
+    match arg {
+        ScorerArg::Panel => Scorer::Panel(profile_for_ext(ext)),
+        ScorerArg::Current => Scorer::Current,
+        ScorerArg::Schur => Scorer::Schur,
+        ScorerArg::Pivot => Scorer::Pivot,
+        ScorerArg::Trophic => Scorer::Trophic,
+        ScorerArg::Strahler => Scorer::Strahler,
+    }
+}
+
+/// Which panel weight vector fits an input's dependence-graph granularity,
+/// by extension: the oxc-lowered JS/TS frontend is statement-granular (one
+/// node per statement), everything else lowers from bytecode and is
+/// instruction-granular. Mirrors the extension match in [`run`].
+fn profile_for_ext(ext: &str) -> PanelProfile {
+    match ext {
+        "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => PanelProfile::Statement,
+        _ => PanelProfile::Instruction,
     }
 }
 
@@ -180,9 +198,10 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             ("salience-js/oxc".to_owned(), lowered.functions, None)
         }
         other => {
-            return Err(
-                format!("unsupported input type {other:?}: expected a .class, .py, .js or .ts file").into(),
-            );
+            return Err(format!(
+                "unsupported input type {other:?}: expected a .class, .py, .js or .ts file"
+            )
+            .into());
         }
     };
 
@@ -211,7 +230,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             );
             continue;
         }
-        let sal = analyze_with_scorer(ir, &denylist, &weights, args.scorer.into());
+        let sal = analyze_with_scorer(ir, &denylist, &weights, resolve_scorer(args.scorer, ext));
         sidecar.push(ir, &sal);
         analyzed += 1;
     }

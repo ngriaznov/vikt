@@ -867,7 +867,7 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
 /// combination, the provenance of its weights, and the held-out evidence. The
 /// single-instrument variants exist so the panel's members stay individually
 /// inspectable and re-measurable; they are instruments, not products.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scorer {
     /// The incumbent weighted blend — [`score_of`]. What plain [`analyze`]
     /// computes.
@@ -880,9 +880,17 @@ pub enum Scorer {
     Trophic,
     /// Horton–Strahler confluence order — [`crate::strahler`].
     Strahler,
-    /// The fitted five-instrument combination — [`crate::panel`]. The default.
-    #[default]
-    Panel,
+    /// The fitted five-instrument combination — [`crate::panel`]. The
+    /// default. Carries which fitted weight vector to use — see
+    /// [`crate::panel::PanelProfile`], selected by dependence-graph
+    /// granularity, not by language.
+    Panel(crate::panel::PanelProfile),
+}
+
+impl Default for Scorer {
+    fn default() -> Self {
+        Scorer::Panel(crate::panel::PanelProfile::default())
+    }
 }
 
 /// Runs tiering exactly as [`analyze`] does, then replaces the score with the
@@ -908,7 +916,7 @@ pub fn analyze_with_scorer(
         )),
         Scorer::Trophic => Some(crate::trophic::score(&sal.graph)),
         Scorer::Strahler => Some(crate::strahler::score(&sal.graph)),
-        Scorer::Panel => Some(crate::panel::score(ir, &sal, denylist)),
+        Scorer::Panel(profile) => Some(crate::panel::score(ir, &sal, denylist, profile)),
     };
     if let Some(scores) = replacement {
         for (ns, s) in sal.nodes.iter_mut().zip(scores) {

@@ -39,18 +39,16 @@
 //!    immune to any monotone rescaling of a member);
 //! 3. position is the line's rank in source order; boundary is `1.0` when the
 //!    line's strongest tier is [`Tier::Boundary`];
-//! 4. the line's panel score is the dot product with [`WEIGHTS`], and every
-//!    node on the line inherits it.
+//! 4. the line's panel score is the dot product with the selected
+//!    [`PanelProfile`]'s weight vector, and every node on the line inherits
+//!    it.
 //!
 //! # Provenance of the weights
 //!
-//! Ridge regression (λ = 0.03, chosen by inner cross-validation), fitted on
-//! `eval/ground-truth-v3.json`: 16 stdlib functions, 425 lines, labelled
-//! 0–10 by the expert rater from source, blind, before any scorer ran.
-//! Leave-one-function-out evaluation of this exact feature set: mean held-out
-//! Spearman **0.517** (position-only null: 0.359; best single instrument:
-//! 0.357). The fitting script is `eval/judgement.py`; the numbers are
-//! reproducible from the repo.
+//! Two vectors, one per dependence-graph granularity — see
+//! [`INSTRUCTION_WEIGHTS`], [`STATEMENT_WEIGHTS`] and [`PanelProfile`] for
+//! the fit details, the held-out numbers, and why a single vector does not
+//! serve both substrates.
 //!
 //! The weights are baked as constants rather than loaded from a file: the
 //! panel is a *shipped strategy*, not a tunable — retuning belongs in eval/,
@@ -65,10 +63,78 @@ use crate::salience::{Denylist, FunctionSalience, Tier};
 /// Fitted weight of each panel member, in the order
 /// `[current, schur, pivot, trophic, strahler, position, boundary]`.
 ///
-/// See the module docs for provenance. Do not hand-edit: these are the ridge
-/// coefficients from the oracle fit, and the held-out number quoted alongside
-/// them is only true of exactly these values.
-pub const WEIGHTS: [f64; 7] = [0.1643, 0.1654, 0.1888, 0.1092, 0.1097, 0.2505, -0.0521];
+/// Ridge regression (λ = 0.03, chosen by inner cross-validation), fitted on
+/// `eval/ground-truth-v3.json`: 16 stdlib functions, 425 lines, labelled
+/// 0–10 by the expert rater from source, blind, before any scorer ran.
+/// Leave-one-function-out evaluation of this exact feature set: mean held-out
+/// Spearman **0.517** (position-only null: 0.359; best single instrument:
+/// 0.357). The fitting script is `eval/judgement.py`; the numbers are
+/// reproducible from the repo.
+///
+/// The graph these weights were fitted against is bytecode-granular: one
+/// node per JVM/CPython instruction, several to a source line. Use this
+/// vector for bytecode frontends. See [`STATEMENT_WEIGHTS`] for the
+/// statement-granular AST refit, and [`PanelProfile`] for how the two are
+/// selected.
+///
+/// Do not hand-edit: these are the ridge coefficients from the oracle fit,
+/// and the held-out number quoted alongside them is only true of exactly
+/// these values.
+pub const INSTRUCTION_WEIGHTS: [f64; 7] = [0.1643, 0.1654, 0.1888, 0.1092, 0.1097, 0.2505, -0.0521];
+
+/// Fitted weight of each panel member for statement-granular AST graphs, in
+/// the same order as [`INSTRUCTION_WEIGHTS`]:
+/// `[current, schur, pivot, trophic, strahler, position, boundary]`.
+///
+/// Ridge on `eval/ground-truth-js-v1.json`: 9 functions, 100 lines, drawn
+/// from lodash/express/zod, labelled blind and committed before measurement.
+/// λ = 0.3, chosen by inner leave-one-out. Leave-one-function-out held-out
+/// Spearman **0.676**, against 0.603 for the instruction weights applied
+/// zero-shot to this substrate, and 0.695 for the position null.
+///
+/// The instruction weights transfer (0.603 beats their own 0.517 on Python),
+/// but not evenly: on statement-granular graphs strahler's per-node
+/// resolution roughly doubles its discriminating power, while schur and
+/// pivot - deletion-sensitivity and single-point-of-failure, both leaning on
+/// bytecode's denser dependence structure - collapse toward noise. This
+/// vector is the corrective: a per-substrate refit rather than one weight
+/// vector asked to serve graphs of two different granularities.
+///
+/// Do not hand-edit; see [`INSTRUCTION_WEIGHTS`] for the sibling vector's
+/// provenance and the same caveat.
+pub const STATEMENT_WEIGHTS: [f64; 7] = [0.1386, 0.1109, 0.0917, 0.1559, 0.1587, 0.1800, 0.0522];
+
+/// Which fitted weight vector the panel should use.
+///
+/// The panel's weights were ridge-fitted against a specific dependence-graph
+/// granularity, and that granularity is a property of the *frontend*, not
+/// the language: bytecode frontends (JVM, CPython) emit several nodes per
+/// source line, so schur's deletion-sensitivity and pivot's single-point-of-
+/// failure signal have room to discriminate between them; the oxc-based JS/TS
+/// frontend lowers to one node per statement, which starves those two
+/// instruments and roughly doubles strahler's discriminating power (see the
+/// transfer measurement in `eval/RESULTS-real-code.md`). The granularity of
+/// the dependence graph changes which instruments carry signal, so the
+/// weight vector has to change with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanelProfile {
+    /// Bytecode frontends (JVM, `CPython`): [`INSTRUCTION_WEIGHTS`].
+    #[default]
+    Instruction,
+    /// AST frontends (JS/TS): [`STATEMENT_WEIGHTS`].
+    Statement,
+}
+
+impl PanelProfile {
+    /// The fitted weight vector for this profile.
+    #[must_use]
+    pub fn weights(self) -> [f64; 7] {
+        match self {
+            PanelProfile::Instruction => INSTRUCTION_WEIGHTS,
+            PanelProfile::Statement => STATEMENT_WEIGHTS,
+        }
+    }
+}
 
 /// Within-function rank of each value in `[0, 1]`, ties sharing their mean
 /// rank — the same normalisation the fit used (`eval/judgement.py::rank01`).
@@ -83,7 +149,11 @@ fn rank01(vals: &[f64]) -> Vec<f64> {
         return vec![0.5; n];
     }
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| vals[a].partial_cmp(&vals[b]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_by(|&a, &b| {
+        vals[a]
+            .partial_cmp(&vals[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut out = vec![0.0; n];
     let mut i = 0;
     while i < n {
@@ -115,14 +185,21 @@ fn to_lines(per_node: &[f64], lines: &BTreeMap<u32, Vec<usize>>) -> Vec<f64> {
         .collect()
 }
 
-/// Computes the panel score for every node of `ir`.
+/// Computes the panel score for every node of `ir`, using `profile`'s
+/// fitted weight vector.
 ///
 /// `sal` must be the result of [`crate::salience::analyze`] on the same `ir`:
 /// its per-node scores are the `current` member, its tiers drive the boundary
 /// feature and the inert floor. Structural nodes and nodes without a line
 /// score `0.0` — they are invisible to the artifact projection anyway.
 #[must_use]
-pub fn score(ir: &FunctionIr, sal: &FunctionSalience, denylist: &Denylist) -> Vec<f64> {
+pub fn score(
+    ir: &FunctionIr,
+    sal: &FunctionSalience,
+    denylist: &Denylist,
+    profile: PanelProfile,
+) -> Vec<f64> {
+    let weights = profile.weights();
     let n = ir.nodes.len();
     let graph: &Graph = &sal.graph;
 
@@ -168,14 +245,18 @@ pub fn score(ir: &FunctionIr, sal: &FunctionSalience, denylist: &Denylist) -> Ve
                 .map(|&i| sal.nodes[i].tier)
                 .max()
                 .unwrap_or(Tier::Inert);
-            if strongest == Tier::Boundary { 1.0 } else { 0.0 }
+            if strongest == Tier::Boundary {
+                1.0
+            } else {
+                0.0
+            }
         })
         .collect();
 
     let mut per_line: BTreeMap<u32, f64> = BTreeMap::new();
     for (i, (&line, _)) in lines.iter().enumerate() {
-        let mut s = WEIGHTS[5] * position[i] + WEIGHTS[6] * boundary[i];
-        for (f, w) in feats.iter().zip(&WEIGHTS[..5]) {
+        let mut s = weights[5] * position[i] + weights[6] * boundary[i];
+        for (f, w) in feats.iter().zip(&weights[..5]) {
             s += w * f[i];
         }
         per_line.insert(line, s.clamp(0.0, 1.0));
@@ -258,7 +339,7 @@ mod tests {
     fn every_node_on_a_line_shares_the_line_score() {
         let ir = fixture();
         let sal = analyze(&ir, &Denylist::new(), &ScoreWeights::default());
-        let s = score(&ir, &sal, &Denylist::new());
+        let s = score(&ir, &sal, &Denylist::new(), PanelProfile::Instruction);
         assert_eq!(s.len(), ir.nodes.len());
         // One node per line here, so simply: all finite, all in [0,1].
         for v in &s {
@@ -269,32 +350,66 @@ mod tests {
     #[test]
     fn later_derivation_outranks_setup_on_a_pure_chain() {
         // On a straight chain every instrument agrees the tail is where the
-        // work lands, and position reinforces it; the panel must too.
+        // work lands, and position reinforces it; the panel must too, under
+        // either profile.
         let ir = fixture();
         let sal = analyze(&ir, &Denylist::new(), &ScoreWeights::default());
-        let s = score(&ir, &sal, &Denylist::new());
-        assert!(
-            s[3] > s[0],
-            "state write {} should outrank initial load {}",
-            s[3],
-            s[0]
-        );
+        for profile in [PanelProfile::Instruction, PanelProfile::Statement] {
+            let s = score(&ir, &sal, &Denylist::new(), profile);
+            assert!(
+                s[3] > s[0],
+                "{profile:?}: state write {} should outrank initial load {}",
+                s[3],
+                s[0]
+            );
+        }
     }
 
     #[test]
     fn deterministic() {
+        // Repeat calls must agree, and must agree under both profiles - the
+        // profile only picks which constant vector feeds the same
+        // deterministic arithmetic.
         let ir = fixture();
         let sal = analyze(&ir, &Denylist::new(), &ScoreWeights::default());
-        let a = score(&ir, &sal, &Denylist::new());
-        let b = score(&ir, &sal, &Denylist::new());
-        assert_eq!(a, b);
+        for profile in [PanelProfile::Instruction, PanelProfile::Statement] {
+            let a = score(&ir, &sal, &Denylist::new(), profile);
+            let b = score(&ir, &sal, &Denylist::new(), profile);
+            assert_eq!(a, b, "{profile:?} was not deterministic");
+        }
+    }
+
+    #[test]
+    fn profile_selects_the_weight_vector() {
+        // The two vectors were fitted independently on different substrates;
+        // on the same fixture they must actually produce different scores,
+        // or `profile` would be decorative. Any node whose feature vector
+        // isn't degenerate will do - `state write` (line 4) is at the
+        // convergence of all five instruments, so it moves the most.
+        let ir = fixture();
+        let sal = analyze(&ir, &Denylist::new(), &ScoreWeights::default());
+        let instruction = score(&ir, &sal, &Denylist::new(), PanelProfile::Instruction);
+        let statement = score(&ir, &sal, &Denylist::new(), PanelProfile::Statement);
+        assert_ne!(
+            instruction, statement,
+            "Instruction and Statement profiles scored this fixture identically"
+        );
     }
 
     #[test]
     fn weights_match_documented_fit() {
-        // The doc-comment quotes held-out 0.517 for exactly these values; a
-        // drive-by edit to one constant would silently falsify the docs.
-        let sum: f64 = WEIGHTS.iter().sum();
-        assert!((sum - 0.9358).abs() < 1e-9, "weights changed: sum={sum}");
+        // The doc comments quote held-out 0.517 (instruction) and 0.676
+        // (statement) for exactly these values; a drive-by edit to one
+        // constant would silently falsify the docs.
+        let instruction_sum: f64 = INSTRUCTION_WEIGHTS.iter().sum();
+        assert!(
+            (instruction_sum - 0.9358).abs() < 1e-9,
+            "instruction weights changed: sum={instruction_sum}"
+        );
+        let statement_sum: f64 = STATEMENT_WEIGHTS.iter().sum();
+        assert!(
+            (statement_sum - 0.888).abs() < 1e-9,
+            "statement weights changed: sum={statement_sum}"
+        );
     }
 }
