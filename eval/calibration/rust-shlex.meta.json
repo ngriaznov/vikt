@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/comex/rust-shlex.git",
+  "commit": "653936e120cdd0a8d1b4f0837e2cce0f347da4c0",
+  "language": "rust",
+  "test_cmd": "cargo test --quiet",
+  "mutants_executed": 34,
+  "invalid": 10,
+  "panel_rho": 0.204,
+  "null_rho": -0.066,
+  "verdict": "marginal — panel rho 0.204 beats the positional null (-0.066), but not by both the 0.1 margin and the 0.3 floor"
+}
