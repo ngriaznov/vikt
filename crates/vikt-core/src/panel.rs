@@ -185,22 +185,21 @@ fn to_lines(per_node: &[f64], lines: &BTreeMap<u32, Vec<usize>>) -> Vec<f64> {
         .collect()
 }
 
-/// Computes the panel score for every node of `ir`, using `profile`'s
-/// fitted weight vector.
+/// The per-line feature vectors the panel combines, in weight order:
+/// `[current, schur, pivot, trophic, strahler, position, boundary]` — the
+/// five instruments rank-normalised within the function, the two structural
+/// features on their natural `[0, 1]` scales.
 ///
-/// `sal` must be the result of [`crate::salience::analyze`] on the same `ir`:
-/// its per-node scores are the `current` member, its tiers drive the boundary
-/// feature and the inert floor. Structural nodes and nodes without a line
-/// score `0.0` — they are invisible to the artifact projection anyway.
+/// Measurement/audit surface: exists so calibration can pair each line's raw
+/// instrument readings with observed behaviour (mutant kill rates) and refit
+/// the weights offline. [`score`] combines exactly these values, so the two
+/// can never disagree.
 #[must_use]
-pub fn score(
+pub fn line_features(
     ir: &FunctionIr,
     sal: &FunctionSalience,
     denylist: &Denylist,
-    profile: PanelProfile,
-) -> Vec<f64> {
-    let weights = profile.weights();
-    let n = ir.nodes.len();
+) -> BTreeMap<u32, [f64; 7]> {
     let graph: &Graph = &sal.graph;
 
     // Line → participating nodes, excluding structural nodes, exactly as the
@@ -215,7 +214,7 @@ pub fn score(
         }
     }
     if lines.is_empty() {
-        return vec![0.0; n];
+        return BTreeMap::new();
     }
 
     // The five instruments, per node.
@@ -253,14 +252,54 @@ pub fn score(
         })
         .collect();
 
-    let mut per_line: BTreeMap<u32, f64> = BTreeMap::new();
-    for (i, (&line, _)) in lines.iter().enumerate() {
-        let mut s = weights[5] * position[i] + weights[6] * boundary[i];
-        for (f, w) in feats.iter().zip(&weights[..5]) {
-            s += w * f[i];
-        }
-        per_line.insert(line, s.clamp(0.0, 1.0));
+    lines
+        .keys()
+        .enumerate()
+        .map(|(i, &line)| {
+            (
+                line,
+                [
+                    feats[0][i],
+                    feats[1][i],
+                    feats[2][i],
+                    feats[3][i],
+                    feats[4][i],
+                    position[i],
+                    boundary[i],
+                ],
+            )
+        })
+        .collect()
+}
+
+/// Computes the panel score for every node of `ir`, using `profile`'s
+/// fitted weight vector.
+///
+/// `sal` must be the result of [`crate::salience::analyze`] on the same `ir`:
+/// its per-node scores are the `current` member, its tiers drive the boundary
+/// feature and the inert floor. Structural nodes and nodes without a line
+/// score `0.0` — they are invisible to the artifact projection anyway.
+#[must_use]
+pub fn score(
+    ir: &FunctionIr,
+    sal: &FunctionSalience,
+    denylist: &Denylist,
+    profile: PanelProfile,
+) -> Vec<f64> {
+    let weights = profile.weights();
+    let n = ir.nodes.len();
+    let features = line_features(ir, sal, denylist);
+    if features.is_empty() {
+        return vec![0.0; n];
     }
+
+    let per_line: BTreeMap<u32, f64> = features
+        .iter()
+        .map(|(&line, f)| {
+            let s: f64 = f.iter().zip(&weights).map(|(x, w)| x * w).sum();
+            (line, s.clamp(0.0, 1.0))
+        })
+        .collect();
 
     (0..n)
         .map(|i| {

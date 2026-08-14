@@ -1,0 +1,8 @@
+# The calibrate fixture is its own workspace so it never attaches to any
+# parent manifest — inside the temporary copy it is the whole world.
+[package]
+name = "calib-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]

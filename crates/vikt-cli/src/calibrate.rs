@@ -13,9 +13,13 @@
 //! cannot beat "earlier is more important" on this repository has nothing to
 //! offer it.
 //!
-//! Python and JavaScript/TypeScript today: mutation needs a language-specific
-//! rewrite engine and a test-command convention, and those are the two
-//! frontends that ship both — see [`Language`] for how a tree picks one.
+//! Python, JavaScript/TypeScript, and Rust cargo packages: mutation needs a
+//! language-specific rewrite engine and a test-command convention — see
+//! [`Language`] for how a tree picks one. Rust runs a build step before the
+//! suite for every mutant, because its engine splices text and a splice can
+//! propose an edit the language rejects: a mutant that does not compile is
+//! *invalid*, discarded from the kill rate entirely, and each mutant costs a
+//! compile, which the run says up front.
 //! TypeScript carries one extra caveat: a mutant that is syntactically valid
 //! JavaScript but violates TypeScript's type system is read as *killed* by
 //! whatever runs the repository's own type check, indistinguishable from a
@@ -35,7 +39,7 @@ use vikt_core::calibration::{
 };
 use vikt_core::mutant::MutantSet;
 use vikt_core::{
-    Denylist, PanelProfile, ScoreWeights, Scorer, analyze_with_scorer, project_to_lines,
+    Denylist, PanelProfile, ScoreWeights, Scorer, analyze, analyze_with_scorer, project_to_lines,
 };
 
 /// Body-size ceiling, matching the analyze path's `--max-instructions`
@@ -65,10 +69,16 @@ const JS_EXT: &[&str] = &["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"];
 /// subset the type-check caveat in the module docs applies to.
 const TS_EXT: &[&str] = &["ts", "mts", "cts", "tsx"];
 
+/// Extensions Rust sources carry. A tree qualifies as Rust by its
+/// `Cargo.toml`, not by these — mutants need a test suite, and a bare `.rs`
+/// file has no way to run one — but the scan still collects them so the
+/// error for a package-less Rust tree can say what it saw.
+const RS_EXT: &[&str] = &["rs"];
+
 /// Extensions that mark a tree as belonging to a frontend calibrate does not
 /// support at all, for an honest "not supported" error instead of a puzzling
 /// "no sources found".
-const OTHER_FRONTENDS: &[&str] = &["class", "java", "kt", "rs"];
+const OTHER_FRONTENDS: &[&str] = &["class", "java", "kt"];
 
 /// Which lowering-and-mutation engine handles a tree, chosen once in `run`
 /// from what [`scan_tree`] found and threaded through every stage that needs
@@ -77,6 +87,7 @@ const OTHER_FRONTENDS: &[&str] = &["class", "java", "kt", "rs"];
 enum Language {
     Python,
     JavaScript,
+    Rust,
 }
 
 impl Language {
@@ -85,6 +96,17 @@ impl Language {
         match self {
             Self::Python => "Python",
             Self::JavaScript => "JavaScript/TypeScript",
+            Self::Rust => "Rust",
+        }
+    }
+
+    /// The dataset's `language` value: one lowercase word, stable across
+    /// releases because refit tooling keys on it.
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Python => "python",
+            Self::JavaScript => "javascript",
+            Self::Rust => "rust",
         }
     }
 
@@ -93,7 +115,7 @@ impl Language {
     /// the oxc-lowered AST. Mirrors `profile_for_ext` in `main.rs`.
     fn panel_profile(self) -> PanelProfile {
         match self {
-            Self::Python => PanelProfile::Instruction,
+            Self::Python | Self::Rust => PanelProfile::Instruction,
             Self::JavaScript => PanelProfile::Statement,
         }
     }
@@ -114,6 +136,10 @@ impl Language {
         match self {
             Self::Python => name.contains('<'),
             Self::JavaScript => name == "<module>",
+            // MIR bodies for closures, generators and inline consts carry
+            // brace-qualified names (`f::{closure#0}`) and overlap their
+            // parent function's extent the way Python lambdas do.
+            Self::Rust => name.contains('{'),
         }
     }
 }
@@ -148,9 +174,10 @@ pub struct CalibrateArgs {
     pub sample: usize,
 
     /// Total mutant budget across all sampled functions. Hitting it is
-    /// reported, never silent.
-    #[arg(long, value_name = "M", default_value_t = 150)]
-    pub budget: usize,
+    /// reported, never silent. Defaults to 150, except 60 for Rust, where
+    /// every mutant costs a compile.
+    #[arg(long, value_name = "M")]
+    pub budget: Option<usize>,
 
     /// Timeout per test run, in seconds. A run that exceeds it is killed and
     /// the mutant counts as killed: a hung suite noticed the mutation.
@@ -162,6 +189,22 @@ pub struct CalibrateArgs {
     /// code only reports whether the measurement itself ran.
     #[arg(long)]
     pub gate: bool,
+
+    /// Build command run before the test command for every Rust mutant,
+    /// from the copy root. Non-zero exit marks the mutant invalid — a
+    /// textual splice the language rejected — which is discarded, not
+    /// killed. Unused outside Rust.
+    #[arg(long, value_name = "COMMAND", default_value = "cargo test --no-run")]
+    pub build_cmd: String,
+
+    /// Write one JSON line per mutated line that carries a panel score:
+    /// the seven per-line panel features (measurement/audit surface of
+    /// `vikt-core::panel::line_features`), the panel score, and the
+    /// observed kill counts — the raw material for refitting the panel
+    /// weights offline against behaviour. Overwritten, sorted by
+    /// (file, function, line).
+    #[arg(long, value_name = "PATH")]
+    pub emit_dataset: Option<PathBuf>,
 
     /// Interpreter used to lower Python sources and generate Python mutants
     /// — and, typically, referenced by the test command itself. Unused when
@@ -182,6 +225,10 @@ struct ScoredFn {
     hi: u32,
     /// Scored lines in the extent.
     lines: usize,
+    /// Per-line panel feature vectors, for `--emit-dataset` only. Computed
+    /// from the plain `analyze` pass, never from the panel-overwritten
+    /// scores: `line_features` documents that contract.
+    feats: BTreeMap<u32, [f64; 7]>,
 }
 
 /// Highest panel score per line, per file — the same "most salient span
@@ -210,7 +257,15 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
     }
 
     let scan = scan_tree(&args.path)?;
-    if scan.py.is_empty() && scan.js.is_empty() {
+    let rust = args.path.join("Cargo.toml").is_file();
+    if !rust && !scan.rs.is_empty() {
+        return Err(format!(
+            "Rust calibration targets a cargo package, and {} has .rs sources but no Cargo.toml — point --path at the package root",
+            args.path.display()
+        )
+        .into());
+    }
+    if !rust && scan.py.is_empty() && scan.js.is_empty() {
         return Err(if scan.other_frontend {
             format!(
                 "calibration supports Python and JavaScript/TypeScript sources only, and {} contains neither",
@@ -251,7 +306,31 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     );
 
+    let budget = args.budget.unwrap_or(if rust { 60 } else { 150 });
     let timeout = Duration::from_secs(args.timeout_secs);
+    if rust {
+        println!(
+            "calibrate: Rust mutants compile before they run (`{}` per mutant) — minutes, not seconds",
+            args.build_cmd
+        );
+        match run_test(&args.build_cmd, &copy.root, timeout)? {
+            TestOutcome::Pass => {}
+            TestOutcome::Fail => {
+                return Err(format!(
+                    "the build command fails on the unmutated tree; fix `{}` (run from the tree root) before calibrating",
+                    args.build_cmd
+                )
+                .into());
+            }
+            TestOutcome::Timeout => {
+                return Err(format!(
+                    "the build command exceeded {}s on the unmutated tree; raise --timeout-secs",
+                    args.timeout_secs
+                )
+                .into());
+            }
+        }
+    }
     match run_test(&args.test_cmd, &copy.root, timeout)? {
         TestOutcome::Pass => println!("calibrate: baseline test command passed"),
         TestOutcome::Fail => {
@@ -270,35 +349,11 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     }
 
-    let py = (!scan.py.is_empty())
-        .then(|| score_tree(&copy.root, &scan.py, Language::Python, &args.python));
-    let js = (!scan.js.is_empty())
-        .then(|| score_tree(&copy.root, &scan.js, Language::JavaScript, &args.python));
-    let (lang, mut scored, file_scores) = match (py, js) {
-        (Some(p), None) => (Language::Python, p.0, p.1),
-        (None, Some(j)) => (Language::JavaScript, j.0, j.1),
-        (Some(p), Some(j)) => {
-            let py_lines: usize = p.1.values().map(BTreeMap::len).sum();
-            let js_lines: usize = j.1.values().map(BTreeMap::len).sum();
-            let (winner, other, w_lines, o_lines) = if py_lines >= js_lines {
-                (Language::Python, Language::JavaScript, py_lines, js_lines)
-            } else {
-                (Language::JavaScript, Language::Python, js_lines, py_lines)
-            };
-            println!(
-                "calibrate: both Python and JavaScript/TypeScript sources found ({py_lines} Python scored lines, {js_lines} JavaScript/TypeScript); calibrating {} only ({w_lines} scored lines beats {other}'s {o_lines}) — narrow --path to target {other} instead",
-                winner.label(),
-                other = other.label(),
-            );
-            if winner == Language::Python {
-                (Language::Python, p.0, p.1)
-            } else {
-                (Language::JavaScript, j.0, j.1)
-            }
-        }
-        (None, None) => {
-            unreachable!("checked above: at least one of scan.py, scan.js is non-empty")
-        }
+    let (lang, mut scored, file_scores) = if rust {
+        let (s, f) = score_crate(&copy.root)?;
+        (Language::Rust, s, f)
+    } else {
+        score_by_majority(&copy.root, &scan, &args.python)
     };
 
     if lang == Language::JavaScript && scan.js.iter().any(|p| is_typescript(p)) {
@@ -324,7 +379,7 @@ repository's own type check is read as killed, indistinguishable from one an act
     );
 
     let (mutants, candidates, invalid_discarded) =
-        generate_mutants(&copy.root, sampled, lang, args)?;
+        generate_mutants(&copy.root, sampled, lang, args, budget)?;
     if invalid_discarded > 0 {
         println!(
             "calibrate: {invalid_discarded} invalid mutants discarded (failed to re-parse after mutation)"
@@ -333,19 +388,17 @@ repository's own type check is read as killed, indistinguishable from one an act
     let attempted = mutants.len() + invalid_discarded;
     if candidates > attempted {
         println!(
-            "calibrate: budget of {} mutants reached: {} of {candidates} candidate sites will run; raise --budget for full coverage",
-            args.budget,
+            "calibrate: budget of {budget} mutants reached: {} of {candidates} candidate sites will run; raise --budget for full coverage",
             mutants.len(),
         );
     } else {
         println!(
-            "calibrate: {} mutants across the sampled functions (budget {})",
+            "calibrate: {} mutants across the sampled functions (budget {budget})",
             mutants.len(),
-            args.budget
         );
     }
 
-    let tally = execute_mutants(&copy.root, &mutants, args, timeout)?;
+    let tally = execute_mutants(&copy.root, &mutants, args, lang, timeout)?;
     println!(
         "calibrate: {} mutants executed: {} killed, {} survived, {} timed out (timeouts count as killed)",
         tally.executed(),
@@ -353,8 +406,19 @@ repository's own type check is read as killed, indistinguishable from one an act
         tally.survived,
         tally.timeouts
     );
+    if tally.invalid_compile > 0 {
+        println!(
+            "calibrate: {} invalid (did not compile) — textual splices the language rejected, excluded from every rate",
+            tally.invalid_compile
+        );
+    }
 
-    let v = judge(sampled, &file_scores, &tally);
+    let pairs = pair_lines(sampled, &file_scores, &tally);
+    let v = judge(sampled, &pairs, &tally);
+    if let Some(path) = &args.emit_dataset {
+        let rows = write_dataset(path, &args.path, lang, sampled, &pairs, &tally)?;
+        println!("dataset: wrote {rows} rows to {}", path.display());
+    }
     Ok(if args.gate {
         ExitCode::from(gate_code(v))
     } else {
@@ -378,6 +442,44 @@ fn gate_code(v: Verdict) -> u8 {
         Verdict::Calibrated | Verdict::Marginal => 0,
         Verdict::InsufficientData => 2,
         Verdict::Uncalibrated => 3,
+    }
+}
+
+/// Scores a mixed (or single-language) Python/JavaScript tree and picks the
+/// language with more scored lines, saying so when both are present.
+fn score_by_majority(
+    root: &Path,
+    scan: &TreeScan,
+    python: &str,
+) -> (Language, Vec<ScoredFn>, FileScores) {
+    let py = (!scan.py.is_empty()).then(|| score_tree(root, &scan.py, Language::Python, python));
+    let js =
+        (!scan.js.is_empty()).then(|| score_tree(root, &scan.js, Language::JavaScript, python));
+    match (py, js) {
+        (Some(p), None) => (Language::Python, p.0, p.1),
+        (None, Some(j)) => (Language::JavaScript, j.0, j.1),
+        (Some(p), Some(j)) => {
+            let py_lines: usize = p.1.values().map(BTreeMap::len).sum();
+            let js_lines: usize = j.1.values().map(BTreeMap::len).sum();
+            let (winner, other, w_lines, o_lines) = if py_lines >= js_lines {
+                (Language::Python, Language::JavaScript, py_lines, js_lines)
+            } else {
+                (Language::JavaScript, Language::Python, js_lines, py_lines)
+            };
+            println!(
+                "calibrate: both Python and JavaScript/TypeScript sources found ({py_lines} Python scored lines, {js_lines} JavaScript/TypeScript); calibrating {} only ({w_lines} scored lines beats {other}'s {o_lines}) — narrow --path to target {other} instead",
+                winner.label(),
+                other = other.label(),
+            );
+            if winner == Language::Python {
+                (Language::Python, p.0, p.1)
+            } else {
+                (Language::JavaScript, j.0, j.1)
+            }
+        }
+        (None, None) => {
+            unreachable!("checked above: at least one of scan.py, scan.js is non-empty")
+        }
     }
 }
 
@@ -411,49 +513,98 @@ fn score_tree(
                     continue;
                 }
             },
+            // Rust lowers whole packages, not files — see `score_crate`.
+            Language::Rust => unreachable!("score_tree is never called for Rust"),
         };
-        for ir in &functions {
-            if ir.validate().is_err() || ir.is_empty() || ir.len() > MAX_INSTRUCTIONS {
-                continue;
-            }
-            // Synthetic wrapper functions overlap the extent of a real def;
-            // sampling them would double-count the same lines and degrade
-            // the positional null into noise. See `Language::is_synthetic`.
-            if lang.is_synthetic(&ir.id.name) {
-                continue;
-            }
-            let sal = analyze_with_scorer(
-                ir,
-                &Denylist::new(),
-                &ScoreWeights::default(),
-                Scorer::Panel(lang.panel_profile()),
-            );
-            let spans = project_to_lines(ir, &sal);
-            let Some(lo) = spans.iter().map(|s| s.start).min() else {
-                continue;
-            };
-            let hi = spans.iter().map(|s| s.end).max().unwrap_or(lo);
-            let per_file = file_scores.entry(rel.clone()).or_default();
-            let mut lines = 0;
-            for s in &spans {
-                for ln in s.start..=s.end {
-                    lines += 1;
-                    let e = per_file.entry(ln).or_insert(f64::MIN);
-                    if s.score > *e {
-                        *e = s.score;
-                    }
-                }
-            }
-            scored.push(ScoredFn {
-                file: rel.clone(),
-                name: ir.id.name.clone(),
-                lo,
-                hi,
-                lines,
-            });
-        }
+        score_functions(rel, &functions, lang, &mut scored, &mut file_scores);
     }
     (scored, file_scores)
+}
+
+/// Lowers and panel-scores a whole cargo package through the MIR frontend.
+/// One lowering covers every file, so unlike [`score_tree`] there is no
+/// per-file skip: a package that does not compile does not calibrate, and
+/// says why through cargo's own diagnostics. Functions whose spans resolve
+/// outside the copy (macro expansions, generated code) never reach here —
+/// the lowering already drops foreign lines.
+fn score_crate(root: &Path) -> Result<(Vec<ScoredFn>, FileScores), Box<dyn Error>> {
+    let modules = vikt_rs::lower_crate(root, None)?;
+    let mut scored = Vec::new();
+    let mut file_scores = FileScores::new();
+    for module in &modules {
+        let file = Path::new(&module.file);
+        let rel = file.strip_prefix(root).unwrap_or(file).to_path_buf();
+        // An absolute path that did not strip is outside the copy entirely:
+        // a dependency's sources, or the sysroot. Not ours to mutate.
+        if rel.is_absolute() || is_test_path(&rel, Language::Rust) {
+            continue;
+        }
+        score_functions(
+            &rel,
+            &module.functions,
+            Language::Rust,
+            &mut scored,
+            &mut file_scores,
+        );
+    }
+    Ok((scored, file_scores))
+}
+
+/// The shared per-function scoring step: panel scores projected to lines
+/// (via the same overwrite-and-project path the sidecar uses) plus the raw
+/// panel feature vectors for `--emit-dataset`, which come from the plain
+/// `analyze` pass — `line_features` takes the incumbent's scores as its
+/// `current` member, so it must never see the panel-overwritten ones.
+fn score_functions(
+    rel: &Path,
+    functions: &[vikt_core::FunctionIr],
+    lang: Language,
+    scored: &mut Vec<ScoredFn>,
+    file_scores: &mut FileScores,
+) {
+    for ir in functions {
+        if ir.validate().is_err() || ir.is_empty() || ir.len() > MAX_INSTRUCTIONS {
+            continue;
+        }
+        // Synthetic wrapper functions overlap the extent of a real def;
+        // sampling them would double-count the same lines and degrade
+        // the positional null into noise. See `Language::is_synthetic`.
+        if lang.is_synthetic(&ir.id.name) {
+            continue;
+        }
+        let sal = analyze_with_scorer(
+            ir,
+            &Denylist::new(),
+            &ScoreWeights::default(),
+            Scorer::Panel(lang.panel_profile()),
+        );
+        let spans = project_to_lines(ir, &sal);
+        let Some(lo) = spans.iter().map(|s| s.start).min() else {
+            continue;
+        };
+        let hi = spans.iter().map(|s| s.end).max().unwrap_or(lo);
+        let base = analyze(ir, &Denylist::new(), &ScoreWeights::default());
+        let feats = vikt_core::panel::line_features(ir, &base, &Denylist::new());
+        let per_file = file_scores.entry(rel.to_path_buf()).or_default();
+        let mut lines = 0;
+        for s in &spans {
+            for ln in s.start..=s.end {
+                lines += 1;
+                let e = per_file.entry(ln).or_insert(f64::MIN);
+                if s.score > *e {
+                    *e = s.score;
+                }
+            }
+        }
+        scored.push(ScoredFn {
+            file: rel.to_path_buf(),
+            name: ir.id.name.clone(),
+            lo,
+            hi,
+            lines,
+            feats,
+        });
+    }
 }
 
 /// Generates line-targeted mutants for the sampled functions, file by file
@@ -466,6 +617,7 @@ fn generate_mutants(
     sampled: &[ScoredFn],
     lang: Language,
     args: &CalibrateArgs,
+    budget: usize,
 ) -> Result<(Vec<FileMutant>, usize, usize), Box<dyn Error>> {
     let mut files: Vec<&PathBuf> = sampled.iter().map(|f| &f.file).collect();
     files.sort();
@@ -480,7 +632,7 @@ fn generate_mutants(
             .map(|f| (f.lo, f.hi))
             .collect();
         spans.sort_unstable();
-        let remaining = args.budget - mutants.len();
+        let remaining = budget - mutants.len();
         let set: MutantSet = match lang {
             Language::Python => {
                 vikt_py::calibrate::mutants_for(&root.join(file), &spans, remaining, &args.python)?
@@ -488,6 +640,7 @@ fn generate_mutants(
             Language::JavaScript => {
                 vikt_js::calibrate::mutants_for(&root.join(file), &spans, remaining)?
             }
+            Language::Rust => vikt_rs::calibrate::mutants_for(&root.join(file), &spans, remaining)?,
         };
         candidates += set.total_sites;
         invalid_discarded += set.invalid_discarded;
@@ -502,6 +655,10 @@ struct Tally {
     killed: usize,
     survived: usize,
     timeouts: usize,
+    /// Rust only: mutants whose build step failed — textual splices the
+    /// language rejected. Neither killed nor survived; absent from
+    /// `per_line` so no kill rate ever sees them.
+    invalid_compile: usize,
     /// (file, line) -> (kills, mutants).
     per_line: BTreeMap<(PathBuf, u32), (usize, usize)>,
 }
@@ -520,6 +677,7 @@ fn execute_mutants(
     root: &Path,
     mutants: &[FileMutant],
     args: &CalibrateArgs,
+    lang: Language,
     timeout: Duration,
 ) -> Result<Tally, Box<dyn Error>> {
     let mut originals: BTreeMap<&PathBuf, Vec<u8>> = BTreeMap::new();
@@ -532,6 +690,34 @@ fn execute_mutants(
     for (i, (file, mutant)) in mutants.iter().enumerate() {
         let abs = root.join(file);
         std::fs::write(&abs, mutant.source.as_bytes())?;
+        // Rust: build first. A splice the compiler rejects is an invalid
+        // mutant, not a kill — and a build that hangs is treated the same
+        // way, since nothing behavioural was ever measured. The copy's
+        // target dir persists across mutants, so each build is incremental.
+        if lang == Language::Rust {
+            let build = run_test(&args.build_cmd, root, timeout);
+            match build {
+                Ok(TestOutcome::Pass) => {}
+                Ok(TestOutcome::Fail | TestOutcome::Timeout) => {
+                    std::fs::write(&abs, &originals[file])?;
+                    tally.invalid_compile += 1;
+                    eprintln!(
+                        "calibrate: mutant {}/{} {}:{} {} ({}) -> invalid (did not compile)",
+                        i + 1,
+                        mutants.len(),
+                        file.display(),
+                        mutant.line,
+                        mutant.kind,
+                        mutant.detail,
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    std::fs::write(&abs, &originals[file])?;
+                    return Err(e.into());
+                }
+            }
+        }
         let outcome = run_test(&args.test_cmd, root, timeout);
         std::fs::write(&abs, &originals[file])?;
         let outcome = outcome?;
@@ -575,12 +761,26 @@ fn execute_mutants(
     Ok(tally)
 }
 
+/// One mutated line joined with everything the verdict and the dataset both
+/// need: its innermost sampled function, panel score, positional null and
+/// kill counts.
+struct PairedLine {
+    file: PathBuf,
+    line: u32,
+    owner: usize,
+    panel: f64,
+    null: f64,
+    kills: usize,
+    total: usize,
+}
+
 /// Pairs each mutated line with its panel score, its positional-null score
-/// and its kill rate, prints the correlations, and renders the verdict.
-fn judge(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Verdict {
-    // A line is attributed to the innermost sampled function containing it,
-    // so nested defs do not inherit their parent's extent for the null.
-    let mut pairs: Vec<(usize, f64, f64, f64)> = Vec::new(); // (fn, panel, null, kill rate)
+/// and its kill counts. A line is attributed to the innermost sampled
+/// function containing it, so nested defs do not inherit their parent's
+/// extent for the null; lines without a panel score are excluded here, which
+/// keeps the dataset and the verdict measuring the identical set.
+fn pair_lines(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Vec<PairedLine> {
+    let mut pairs = Vec::new();
     let mut unscored = 0usize;
     for ((file, line), (kills, total)) in &tally.per_line {
         let owner = sampled
@@ -600,8 +800,15 @@ fn judge(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Verdi
         } else {
             1.0
         };
-        let rate = *kills as f64 / *total as f64;
-        pairs.push((owner, score, null, rate));
+        pairs.push(PairedLine {
+            file: file.clone(),
+            line: *line,
+            owner,
+            panel: score,
+            null,
+            kills: *kills,
+            total: *total,
+        });
     }
     println!(
         "calibrate: {} mutated lines carry a panel score{}",
@@ -612,10 +819,17 @@ fn judge(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Verdi
             String::new()
         }
     );
+    pairs
+}
 
+/// Prints the correlations and renders the verdict from the paired lines.
+fn judge(sampled: &[ScoredFn], pairs: &[PairedLine], tally: &Tally) -> Verdict {
     let mut by_fn: BTreeMap<usize, Vec<(f64, f64)>> = BTreeMap::new();
-    for &(owner, score, _, rate) in &pairs {
-        by_fn.entry(owner).or_default().push((score, rate));
+    for pl in pairs {
+        by_fn
+            .entry(pl.owner)
+            .or_default()
+            .push((pl.panel, pl.kills as f64 / pl.total as f64));
     }
     let mut printed_header = false;
     for (owner, obs) in &by_fn {
@@ -639,9 +853,12 @@ fn judge(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Verdi
         );
     }
 
-    let panel: Vec<f64> = pairs.iter().map(|p| p.1).collect();
-    let null: Vec<f64> = pairs.iter().map(|p| p.2).collect();
-    let rates: Vec<f64> = pairs.iter().map(|p| p.3).collect();
+    let panel: Vec<f64> = pairs.iter().map(|p| p.panel).collect();
+    let null: Vec<f64> = pairs.iter().map(|p| p.null).collect();
+    let rates: Vec<f64> = pairs
+        .iter()
+        .map(|p| p.kills as f64 / p.total as f64)
+        .collect();
     let panel_rho = spearman(&panel, &rates);
     let null_rho = spearman(&null, &rates);
     println!("\npooled Spearman rho over {} lines:", pairs.len());
@@ -669,12 +886,102 @@ fn judge(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Verdi
     v
 }
 
+/// The `--emit-dataset` row: one mutated, panel-scored line. Serialized as
+/// JSONL in struct-field order; the `instruments` keys are the panel's
+/// feature order and refit tooling depends on exactly these seven.
+#[derive(serde::Serialize)]
+struct DatasetRow<'a> {
+    root: String,
+    language: &'static str,
+    profile: &'static str,
+    file: String,
+    function: &'a str,
+    line: u32,
+    instruments: Instruments,
+    panel: f64,
+    mutants: usize,
+    killed: usize,
+    kill_rate: f64,
+}
+
+/// The seven panel features by name, in weight order.
+#[derive(serde::Serialize)]
+struct Instruments {
+    current: f64,
+    schur: f64,
+    pivot: f64,
+    trophic: f64,
+    strahler: f64,
+    position: f64,
+    boundary: u8,
+}
+
+/// Writes the dataset: every paired line, sorted by (file, function, line),
+/// one JSON object per line, overwriting `path`. Returns the row count.
+fn write_dataset(
+    path: &Path,
+    target: &Path,
+    lang: Language,
+    sampled: &[ScoredFn],
+    pairs: &[PairedLine],
+    _tally: &Tally,
+) -> Result<usize, Box<dyn Error>> {
+    let profile = match lang.panel_profile() {
+        PanelProfile::Instruction => "instruction",
+        PanelProfile::Statement => "statement",
+    };
+    let mut rows: Vec<&PairedLine> = pairs.iter().collect();
+    rows.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| sampled[a.owner].name.cmp(&sampled[b.owner].name))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+    let mut out = String::new();
+    let mut written = 0usize;
+    for pl in rows {
+        let f = &sampled[pl.owner];
+        // A line whose owning function carries no feature vector for it
+        // (projection edge cases) is excluded, mirroring the rho exclusion.
+        let Some(feats) = f.feats.get(&pl.line) else {
+            continue;
+        };
+        let row = DatasetRow {
+            root: target.display().to_string(),
+            language: lang.slug(),
+            profile,
+            file: pl.file.display().to_string(),
+            function: &f.name,
+            line: pl.line,
+            instruments: Instruments {
+                current: feats[0],
+                schur: feats[1],
+                pivot: feats[2],
+                trophic: feats[3],
+                strahler: feats[4],
+                position: feats[5],
+                boundary: u8::from(feats[6] > 0.5),
+            },
+            panel: pl.panel,
+            mutants: pl.total,
+            killed: pl.kills,
+            kill_rate: pl.kills as f64 / pl.total as f64,
+        };
+        out.push_str(&serde_json::to_string(&row)?);
+        out.push('\n');
+        written += 1;
+    }
+    std::fs::write(path, out)?;
+    Ok(written)
+}
+
 /// What a walk of the input tree found. Paths are relative to the root and
 /// sorted, so every downstream stage is order-deterministic.
 struct TreeScan {
     files: Vec<PathBuf>,
     py: Vec<PathBuf>,
     js: Vec<PathBuf>,
+    rs: Vec<PathBuf>,
     /// `node_modules` directories found anywhere in the tree, relative to
     /// the root. Never descended into for scoring or mutation, but staged
     /// into the copy (see [`TempTree::create`]) since a `node --test`/`npm
@@ -689,6 +996,7 @@ fn scan_tree(root: &Path) -> std::io::Result<TreeScan> {
         files: Vec::new(),
         py: Vec::new(),
         js: Vec::new(),
+        rs: Vec::new(),
         node_modules: Vec::new(),
         other_frontend: false,
         skipped_large: 0,
@@ -698,6 +1006,7 @@ fn scan_tree(root: &Path) -> std::io::Result<TreeScan> {
     scan.files.sort();
     scan.py.sort();
     scan.js.sort();
+    scan.rs.sort();
     scan.node_modules.sort();
     Ok(scan)
 }
@@ -771,6 +1080,8 @@ fn walk(
                 scan.py.push(rel.clone());
             } else if JS_EXT.contains(&ext) {
                 scan.js.push(rel.clone());
+            } else if RS_EXT.contains(&ext) {
+                scan.rs.push(rel.clone());
             }
             scan.files.push(rel);
         }
@@ -860,6 +1171,7 @@ fn is_test_path(rel: &Path, lang: Language) -> bool {
             let name = c.as_os_str().to_str();
             matches!(name, Some("test" | "tests"))
                 || (lang == Language::JavaScript && name == Some("__tests__"))
+                || (lang == Language::Rust && matches!(name, Some("benches" | "examples")))
         })
     });
     let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
@@ -869,6 +1181,10 @@ fn is_test_path(rel: &Path, lang: Language) -> bool {
             name.strip_suffix(&format!(".{ext}"))
                 .is_some_and(|base| base.ends_with(".test") || base.ends_with(".spec"))
         }),
+        // Rust unit tests live inside source files behind #[cfg(test)],
+        // which `cargo check` never lowers — path rules only need to cover
+        // the conventional integration/bench/example directories above.
+        Language::Rust => false,
     };
     in_test_dir || by_name
 }

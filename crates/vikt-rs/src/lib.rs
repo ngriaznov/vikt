@@ -38,6 +38,8 @@ use std::process::Command;
 use serde::Deserialize;
 use vikt_core::ir::{CallOpacity, FunctionId, FunctionIr, Node, NodeKind, VarId};
 
+pub mod calibrate;
+
 /// Something went wrong invoking or parsing the MIR lowering.
 #[derive(Debug, thiserror::Error)]
 pub enum RsError {

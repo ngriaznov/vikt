@@ -399,7 +399,9 @@ positional null the bakeoffs use, because a panel that cannot beat "earlier
 is more important" on a tree has nothing to offer it.
 
 ```bash
-vikt calibrate path/to/repo --test-cmd "python3 -m unittest"
+vikt calibrate path/to/repo --test-cmd "python3 -m unittest"   # Python
+vikt calibrate path/to/app  --test-cmd "node --test"           # JavaScript/TypeScript
+vikt calibrate path/to/pkg  --test-cmd "cargo test"            # Rust (a cargo package)
 ```
 
 The test command runs with `sh -c` from the root of a temporary copy of the
@@ -412,12 +414,26 @@ it — 0 for calibrated or marginal, 2 for insufficient data, 3 for
 uncalibrated; without the flag, exit status only reports whether the
 measurement itself ran.
 
-Limits: Python sources only for now (mutation needs an AST round-trip and
-a test-command convention, and the Python frontend is the one that ships
-both); the mutant budget is capped (default 150 mutants over the 12 largest
-scored functions, `--budget` and `--sample` to change), and hitting the cap
-is reported, never silent; and the suite must pass on the unmutated copy
-before anything is mutated — a failing baseline aborts the run.
+Per-language mechanics: Python mutants are AST round-trips; JavaScript and
+TypeScript mutants are byte-span splices re-parsed with oxc before use
+(`node_modules` is symlinked into the copy, never scored or mutated;
+TypeScript caveat — a type-invalid mutant is read as killed by the
+repository's own toolchain, indistinguishable from a test catch); Rust
+targets a cargo package and builds every mutant before running the suite
+(default `cargo test --no-run`, `--build-cmd` to change) — a splice the
+compiler rejects is *invalid* and excluded from every rate, not a kill,
+and because each mutant costs a compile the Rust budget defaults to 60.
+
+Limits: the mutant budget is capped (default 150 over the 12 largest scored
+functions, `--budget` and `--sample` to change), and hitting the cap is
+reported, never silent; the suite must pass on the unmutated copy before
+anything is mutated — a failing baseline aborts the run; JVM sources are
+not yet calibratable.
+
+`--emit-dataset <path>` additionally writes one JSON line per mutated,
+panel-scored line — the seven per-line panel features, the panel score, and
+the observed kill counts — which is the raw material for refitting the
+panel weights offline against measured behaviour instead of rater labels.
 
 Reproduce the scale run (fetches six production codebases, ~2M instructions,
 and prints the per-corpus summary; see `eval/RESULTS-corpus-scale.md` for the

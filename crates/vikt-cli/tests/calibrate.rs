@@ -241,13 +241,31 @@ fn copy_keeps_dot_files_and_follows_symlinks() {
 /// A tree with sources for a frontend calibrate does not support at all gets
 /// the honest scope error, not a generic "nothing found". No interpreter or
 /// oxc parse involved: the check runs on file extensions alone, before
-/// either engine touches the tree. `.js` is deliberately not used here any
-/// more — calibrate now supports it (see `calibrates_a_javascript_tree` in
-/// `calibrate_js.rs`) — so this uses a Rust source, a frontend calibrate has
-/// never covered.
+/// any engine touches the tree. JVM sources are the one frontend family
+/// calibrate has never covered.
 #[test]
 fn unsupported_frontend_trees_are_rejected() {
     let dir = std::env::temp_dir().join(format!("vikt-calibrate-scope-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir is writable");
+    std::fs::write(dir.join("App.java"), "class App {}\n").expect("temp file");
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args(["calibrate"])
+        .arg(&dir)
+        .args(["--test-cmd", "true"])
+        .output()
+        .expect("running the vikt binary");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("contains neither"), "stderr:\n{stderr}");
+}
+
+/// Loose `.rs` files without a `Cargo.toml` cannot run a suite, and the
+/// error must say what the fix is — point at the package root — rather than
+/// pretending the tree is empty.
+#[test]
+fn rust_sources_without_a_manifest_get_directed_to_the_package_root() {
+    let dir = std::env::temp_dir().join(format!("vikt-calibrate-norust-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir is writable");
     std::fs::write(dir.join("app.rs"), "fn main() {}\n").expect("temp file");
     let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
@@ -259,8 +277,99 @@ fn unsupported_frontend_trees_are_rejected() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no Cargo.toml"), "stderr:\n{stderr}");
+}
+
+/// `--emit-dataset`: one JSON object per scored, mutated line, carrying
+/// exactly the seven panel features, sorted by (file, function, line), row
+/// count matching what the run itself reported. The fixture run is
+/// deterministic, so this pins the dataset against the verdict pipeline —
+/// both must always measure the identical set of lines.
+#[test]
+fn emit_dataset_writes_consistent_jsonl() {
+    if !python_available() {
+        eprintln!("skipping: python3 not on PATH");
+        return;
+    }
+    let dataset =
+        std::env::temp_dir().join(format!("vikt-calibrate-ds-{}.jsonl", std::process::id()));
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args([
+            "calibrate",
+            FIXTURE,
+            "--test-cmd",
+            "python3 -m unittest discover",
+        ])
+        .arg("--emit-dataset")
+        .arg(&dataset)
+        .output()
+        .expect("running the vikt binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "vikt failed:\n{stdout}");
+    let text = std::fs::read_to_string(&dataset).expect("dataset file exists");
+    let _ = std::fs::remove_file(&dataset);
+
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("every dataset line parses as JSON"))
+        .collect();
+    assert!(!rows.is_empty());
+    // Field order is a property of the emitted text (serde struct order),
+    // which a parsed map may not preserve — assert it on the raw line.
+    let first = text.lines().next().unwrap();
+    let positions: Vec<usize> = [
+        "current", "schur", "pivot", "trophic", "strahler", "position", "boundary",
+    ]
+    .iter()
+    .map(|k| {
+        first
+            .find(&format!("\"{k}\""))
+            .expect("feature key present")
+    })
+    .collect();
     assert!(
-        stderr.contains("Python and JavaScript/TypeScript sources only"),
-        "stderr:\n{stderr}"
+        positions.windows(2).all(|w| w[0] < w[1]),
+        "instrument keys must be emitted in weight order: {first}"
     );
+    let reported: usize = stdout
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("dataset: wrote ")
+                .and_then(|r| r.split(' ').next())
+                .and_then(|n| n.parse().ok())
+        })
+        .expect("the run must report the dataset row count");
+    assert_eq!(rows.len(), reported);
+
+    let mut keys_prev: Option<(String, String, u64)> = None;
+    for row in &rows {
+        let inst = row["instruments"]
+            .as_object()
+            .expect("instruments is an object");
+        let mut keys: Vec<_> = inst.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "boundary", "current", "pivot", "position", "schur", "strahler", "trophic"
+            ],
+            "exactly the seven panel features"
+        );
+        let panel = row["panel"].as_f64().expect("panel is a number");
+        assert!((0.0..=1.0).contains(&panel));
+        assert_eq!(row["language"], "python");
+        assert_eq!(row["profile"], "instruction");
+        let key = (
+            row["file"].as_str().unwrap().to_owned(),
+            row["function"].as_str().unwrap().to_owned(),
+            row["line"].as_u64().unwrap(),
+        );
+        if let Some(prev) = &keys_prev {
+            assert!(
+                *prev <= key,
+                "rows must be sorted by (file, function, line)"
+            );
+        }
+        keys_prev = Some(key);
+    }
 }
