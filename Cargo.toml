@@ -9,14 +9,14 @@ exclude = ["tools/rust-lower"]
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/ngriaznov/weightloss"
+repository = "https://github.com/ngriaznov/vikt"
 
 [workspace.dependencies]
-salience-core = { path = "crates/salience-core" }
-salience-jvm = { path = "crates/salience-jvm" }
-salience-js = { path = "crates/salience-js" }
-salience-rs = { path = "crates/salience-rs" }
-salience-py = { path = "crates/salience-py" }
+vikt-core = { path = "crates/vikt-core" }
+vikt-jvm = { path = "crates/vikt-jvm" }
+vikt-js = { path = "crates/vikt-js" }
+vikt-rs = { path = "crates/vikt-rs" }
+vikt-py = { path = "crates/vikt-py" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

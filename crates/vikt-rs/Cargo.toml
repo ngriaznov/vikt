@@ -1,0 +1,17 @@
+[package]
+name = "vikt-rs"
+version = "0.1.0"
+description = "Rust frontend for vikt-core: spawns the nightly-pinned MIR lowerer and parses its JSON."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vikt-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

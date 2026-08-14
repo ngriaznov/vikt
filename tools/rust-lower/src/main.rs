@@ -1,13 +1,13 @@
-//! MIR -> salience FunctionIr JSON, via rustc_public.
+//! MIR -> vikt FunctionIr JSON, via rustc_public.
 //!
-//! This binary is the Rust analogue of `crates/salience-py/src/lower.py`: a
+//! This binary is the Rust analogue of `crates/vikt-py/src/lower.py`: a
 //! substrate-specific lowerer that speaks the neutral JSON contract on stdout
-//! so the stable `salience-rs` crate never links compiler internals. It is
+//! so the stable `vikt-rs` crate never links compiler internals. It is
 //! nightly-pinned (see rust-toolchain.toml beside this crate) because
 //! rustc_public is nightly-only even to read; the pin quarantines that fact
 //! here, and the main workspace stays stable.
 //!
-//! Usage: salience-rust-lower <file.rs> [--edition 2021]
+//! Usage: vikt-rust-lower <file.rs> [--edition 2021]
 //!
 //! Design decisions, mirroring the measured ones in the other frontends:
 //! - Unwind/cleanup edges are DROPPED. Exception edges destroyed agreement
@@ -363,7 +363,7 @@ fn lower_all() -> Vec<JFunction> {
     functions
 }
 
-/// Single-file mode: `salience-rust-lower <file.rs> [--edition E]`.
+/// Single-file mode: `vikt-rust-lower <file.rs> [--edition E]`.
 fn run_single_file(file: &str, edition: &str) -> ! {
     let rustc_args = vec![
         "rustc".to_owned(),
@@ -390,12 +390,12 @@ fn run_single_file(file: &str, edition: &str) -> ! {
 /// for every compilation unit. Dependencies, build scripts and proc-macros
 /// pass through to the real compiler untouched; the primary package (cargo
 /// sets CARGO_PRIMARY_PACKAGE=1 for it) is compiled through rustc_public
-/// instead, with the JSON written to $SALIENCE_LOWER_OUT/<crate>-<hash>.json.
+/// instead, with the JSON written to $VIKT_LOWER_OUT/<crate>-<hash>.json.
 /// Compilation continues to completion either way, so cargo sees the
 /// artifacts it expects.
 fn run_as_wrapper(real_rustc: &str, rest: &[String]) -> ! {
     let is_primary = std::env::var("CARGO_PRIMARY_PACKAGE").is_ok();
-    let out_dir = std::env::var("SALIENCE_LOWER_OUT").ok();
+    let out_dir = std::env::var("VIKT_LOWER_OUT").ok();
     let crate_name = rest
         .iter()
         .position(|a| a == "--crate-name")
@@ -455,7 +455,7 @@ fn main() {
         run_as_wrapper(&first, &args[2..]);
     }
     if first.is_empty() {
-        eprintln!("usage: salience-rust-lower <file.rs> [--edition E]");
+        eprintln!("usage: vikt-rust-lower <file.rs> [--edition E]");
         std::process::exit(2);
     }
     let edition = args

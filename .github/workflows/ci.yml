@@ -42,4 +42,4 @@ jobs:
         working-directory: tools/rust-lower
         run: cargo build --release
       - name: Run Rust-frontend tests against the helper
-        run: cargo test --release -p salience-rs
+        run: cargo test --release -p vikt-rs

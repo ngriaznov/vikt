@@ -1,8 +1,8 @@
 [package]
-name = "salience-rust-lower"
+name = "vikt-rust-lower"
 version = "0.1.0"
 edition = "2021"
-description = "Nightly-pinned MIR lowerer: emits salience FunctionIr JSON via rustc_public. Deliberately OUTSIDE the stable workspace."
+description = "Nightly-pinned MIR lowerer: emits vikt FunctionIr JSON via rustc_public. Deliberately OUTSIDE the stable workspace."
 license = "MIT OR Apache-2.0"
 # Ties itself to one nightly via rust-toolchain.toml; never meant for crates.io.
 publish = false

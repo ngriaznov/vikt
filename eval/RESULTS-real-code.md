@@ -82,7 +82,7 @@ Four findings, in honesty order:
    labels reaches 0.628 with strahler's weight doubled and schur/pivot near
    zero.
 4. **The documented limitations showed up exactly where predicted.** memoize
-   0.41 - the closure-capture gap named in salience-js's docs. acceptParams
+   0.41 - the closure-capture gap named in vikt-js's docs. acceptParams
    0.12 - an index-arithmetic scanner, the same statement-role residual as
    fnmatch.translate and py_scanstring on Python.
 
@@ -95,7 +95,7 @@ merging:
 - STATEMENT_WEIGHTS: a second weight vector refit on the blind JS labels
   (lambda 0.3 by inner CV, LOFO 0.676). --scorer panel now selects the
   profile by input extension; the Instruction path is byte-identical.
-- salience-js closure captures (a closure-bearing statement now USES the
+- vikt-js closure captures (a closure-bearing statement now USES the
   variables its nested function captures) and a real labelled-continue back
   edge. The verifier reproduced the fix's signature independently: memoize's
   params node moved plumbing -> core, "reaches return value in 2 steps".

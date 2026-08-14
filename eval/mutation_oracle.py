@@ -300,7 +300,7 @@ def _walk_trees(n):
         return list(_WALK_ROOTS)
     r = rng()
     for i in range(n):
-        root = tempfile.mkdtemp(prefix=f"salience-walk-{i}-")
+        root = tempfile.mkdtemp(prefix=f"vikt-walk-{i}-")
         stack = [root]
         for _ in range(r.randint(3, 12)):
             base = r.choice(stack)

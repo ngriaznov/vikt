@@ -1,0 +1,24 @@
+[package]
+name = "vikt-cli"
+version = "0.1.0"
+description = "CLI producing per-line salience sidecars"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "vikt"
+path = "src/main.rs"
+
+[dependencies]
+vikt-core = { workspace = true }
+vikt-jvm = { workspace = true }
+vikt-js = { workspace = true }
+vikt-py = { workspace = true }
+vikt-rs = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

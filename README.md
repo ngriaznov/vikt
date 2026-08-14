@@ -1,6 +1,8 @@
-# salience
+# vikt
 
-Deterministic per-line importance over function bodies.
+Deterministic per-line importance over function bodies. *Vikt* is Swedish for
+weight — the stem of *viktig*, important — which is the whole idea: the weight
+of every line, measured.
 
 For every line of every function, one question: **does this line carry
 behavior?** The answer is a tier and a score, computed from dominance, loop
@@ -8,7 +10,7 @@ structure and def-use reachability over an IR. No model runs. Nothing is
 removed. Every span carries the reason that produced it.
 
 ```
-$ salience OrderProcessor.class --annotate OrderProcessor.java
+$ vikt OrderProcessor.class --annotate OrderProcessor.java
 
 inert   11 |         LOG.info("processing " + prices.size() + " prices");
 plumb   13 |         String unused = "this value goes nowhere";
@@ -113,7 +115,7 @@ beating every single instrument on 12 of 16 functions.
 | position | (structural fact) | judgement's demonstrated positional lean | +0.25 |
 | boundary tier | (structural fact) | the tier layer's I/O call | −0.05 |
 
-Mechanics (all in `salience-core/src/panel.rs`, pure Rust like everything
+Mechanics (all in `vikt-core/src/panel.rs`, pure Rust like everything
 else): each instrument's per-node scores are projected to lines by `max`,
 rank-normalised within the function (a scorer's scale is arbitrary across
 functions; its ordering is the signal), then combined by the fitted weights.
@@ -165,7 +167,7 @@ define, what does it use, where can control go next, plus a kind
     captured variables as uses; `catch` bodies are lowered unreachable
     (a measured choice; see the design notes at the end of this section).
 
-**2. Graph analyses, all in `salience-core/src/graph.rs`.** From the raw
+**2. Graph analyses, all in `vikt-core/src/graph.rs`.** From the raw
 node list: control-flow successors → dominance and post-dominance
 (Cooper-Harvey-Kennedy), control dependence (Ferrante-Ottenstein-Warren),
 natural loops via dominator back edges and per-node loop depth, reaching
@@ -255,15 +257,15 @@ classification and a ranking:
 ## Architecture
 
 ```
-salience-core   language-neutral. Dominance, post-dominance, control dependence,
+vikt-core   language-neutral. Dominance, post-dominance, control dependence,
                 natural loops, reaching definitions, tiering, scoring, projection.
                 Knows nothing about any language.
       ^
       |  FunctionIr  (the contract: line, defs, uses, successors, kind)
       |
-salience-jvm    .class -> mokapot MokaIR -> FunctionIr
-salience-py     .py -> CPython dis -> JSON -> FunctionIr
-salience-cli    the `salience` binary
+vikt-jvm    .class -> mokapot MokaIR -> FunctionIr
+vikt-py     .py -> CPython dis -> JSON -> FunctionIr
+vikt-cli    the `vikt` binary
 ```
 
 The seam is `FunctionIr`. A frontend answers four questions per instruction —
@@ -303,7 +305,7 @@ Implement one function: substrate → `Vec<FunctionIr>`.
 | Java | JVM bytecode via `mokapot` | `LineNumberTable`, needs `javac -g` | **working** |
 | Kotlin | same | `LineNumberTable` **plus** JSR-45 SMAP resolution | **working** |
 | Python | CPython bytecode via `dis` | PEP 626 `co_lines()`, exact | **working** |
-| JS/TS | oxc semantic-resolved AST + constructed CFG | AST spans, exact | **working** — see `salience-js` |
+| JS/TS | oxc semantic-resolved AST + constructed CFG | AST spans, exact | **working** — see `vikt-js` |
 | Rust | MIR via `rustc_public`, through a nightly-pinned helper | MIR spans, macro expansions dropped as foreign | **working** — see below |
 | C/C++/Swift | LLVM IR `DILocation` | debug info | not attempted |
 
@@ -311,17 +313,17 @@ Rust analysis needs one extra build step: `rustc_public` is nightly-only, so
 the MIR lowerer lives in `tools/rust-lower`, outside the stable workspace,
 with its own pinned `rust-toolchain.toml`. Build it once
 (`cd tools/rust-lower && cargo build --release`; rustup fetches the pin
-automatically) and the stable `salience` binary finds it on `PATH`, via
-`SALIENCE_RUST_LOWER`, or at its build location. The helper speaks the same
+automatically) and the stable `vikt` binary finds it on `PATH`, via
+`VIKT_RUST_LOWER`, or at its build location. The helper speaks the same
 JSON contract the Python frontend does, so the main workspace never links a
 compiler internal and stays on stable forever.
 
-Whole packages work through cargo: point `salience` at a package directory
+Whole packages work through cargo: point `vikt` at a package directory
 or `Cargo.toml` (with `--package` to pick one member of a workspace) and it
 runs `cargo check` under the pinned toolchain with the helper installed as
 `RUSTC_WRAPPER`. Dependencies, build scripts and proc-macros compile
 untouched; only the primary package is lowered. Dependency artifacts cache
-in `target/salience` under the package (`SALIENCE_TARGET_DIR` redirects
+in `target/vikt` under the package (`VIKT_TARGET_DIR` redirects
 them, for analyzing a checkout that must stay pristine), and each function
 in the sidecar carries its own source file, since a package spans many.
 Single standalone files still work without cargo. MIR is analyzed after
@@ -343,19 +345,19 @@ Python frontend.
 ```bash
 cargo build --release
 
-salience Foo.class                          # JSON sidecar, panel score (default)
-salience foo.py --format text               # one line per span
-salience Foo.class --annotate Foo.java      # tiered source view
-salience Foo.class --stats                  # histogram and timing
-salience Foo.class --inert 'com.acme.Audit' # extend the denylist
-salience Foo.class --no-denylist            # treat nothing as inert
-salience app.ts                             # TS/JS: statement-profile panel
-salience lib.rs                             # Rust via MIR (build tools/rust-lower once)
-salience path/to/package --package foo      # whole cargo package, deps compiled not analyzed
-salience foo.py --scorer strahler           # one instrument alone
-salience foo.py --scorer current            # the incumbent alone
-salience big.py --max-instructions 0        # lift the data-table size guard
-salience foo.py --format sarif              # SARIF 2.1.0 for code scanning
+vikt Foo.class                          # JSON sidecar, panel score (default)
+vikt foo.py --format text               # one line per span
+vikt Foo.class --annotate Foo.java      # tiered source view
+vikt Foo.class --stats                  # histogram and timing
+vikt Foo.class --inert 'com.acme.Audit' # extend the denylist
+vikt Foo.class --no-denylist            # treat nothing as inert
+vikt app.ts                             # TS/JS: statement-profile panel
+vikt lib.rs                             # Rust via MIR (build tools/rust-lower once)
+vikt path/to/package --package foo      # whole cargo package, deps compiled not analyzed
+vikt foo.py --scorer strahler           # one instrument alone
+vikt foo.py --scorer current            # the incumbent alone
+vikt big.py --max-instructions 0        # lift the data-table size guard
+vikt foo.py --format sarif              # SARIF 2.1.0 for code scanning
 ```
 
 `--scorer` selects which algorithm produces the continuous score: `panel`
@@ -383,13 +385,13 @@ or `core,boundary`; plumbing and inert are never emitted, because reporting
 them would bury the signal on any real file.
 
 ```bash
-salience foo.py --format sarif > salience.sarif
+vikt foo.py --format sarif > vikt.sarif
 ```
 
-### Self-calibration: `salience calibrate`
+### Self-calibration: `vikt calibrate`
 
 The numbers above say how the panel performs on the corpora it was measured
-against. `salience calibrate` measures it on *your* repository, with no
+against. `vikt calibrate` measures it on *your* repository, with no
 rater in the loop: it mutates lines the panel scored, lets the repository's
 own test suite decide which mutants die, and reports the Spearman
 correlation between panel score and per-line kill rate — next to the same
@@ -397,7 +399,7 @@ positional null the bakeoffs use, because a panel that cannot beat "earlier
 is more important" on a tree has nothing to offer it.
 
 ```bash
-salience calibrate path/to/repo --test-cmd "python3 -m unittest"
+vikt calibrate path/to/repo --test-cmd "python3 -m unittest"
 ```
 
 The test command runs with `sh -c` from the root of a temporary copy of the
@@ -429,10 +431,10 @@ Try it:
 
 ```bash
 javac -g demo/java/OrderProcessor.java
-./target/release/salience demo/java/OrderProcessor.class \
+./target/release/vikt demo/java/OrderProcessor.class \
     --format text --annotate demo/java/OrderProcessor.java
 
-./target/release/salience demo/python/orders.py \
+./target/release/vikt demo/python/orders.py \
     --format text --annotate demo/python/orders.py
 ```
 
@@ -442,8 +444,8 @@ Both demos are the same program in two languages, and produce the same tiering.
 
 ```json
 {
-  "schema": "salience-sidecar/v1",
-  "generator": "salience-jvm/mokapot",
+  "schema": "vikt-sidecar/v1",
+  "generator": "vikt-jvm/mokapot",
   "file": "OrderProcessor.java",
   "functions": [{
     "name": "OrderProcessor::process",

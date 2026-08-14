@@ -2,37 +2,37 @@
  {
   "name": "panel",
   "field": "fitted five-instrument combination",
-  "binary": "/workspace/weightloss/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/vikt",
   "flag": "--format json --scorer panel"
  },
  {
   "name": "current",
   "field": "incumbent, hand-tuned weighted sum",
-  "binary": "/workspace/weightloss/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/vikt",
   "flag": "--format json --scorer current"
  },
  {
   "name": "schur",
   "field": "Schur complement / graph zeta",
-  "binary": "/workspace/weightloss/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/vikt",
   "flag": "--format json --scorer schur"
  },
  {
   "name": "pivot",
   "field": "reliability theory (Birnbaum)",
-  "binary": "/workspace/weightloss/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/vikt",
   "flag": "--format json --scorer pivot"
  },
  {
   "name": "trophic",
   "field": "food-web ecology (trophic levels)",
-  "binary": "/workspace/weightloss/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/vikt",
   "flag": "--format json --scorer trophic"
  },
  {
   "name": "strahler",
   "field": "geomorphology (Horton-Strahler)",
-  "binary": "/workspace/weightloss/target/release/salience",
+  "binary": "/workspace/weightloss/target/release/vikt",
   "flag": "--format json --scorer strahler"
  }
 ]

@@ -1,0 +1,17 @@
+[package]
+name = "vikt-py"
+version = "0.1.0"
+description = "CPython bytecode frontend for vikt-core"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vikt-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

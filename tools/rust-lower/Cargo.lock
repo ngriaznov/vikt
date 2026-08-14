@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "salience-rust-lower"
+name = "vikt-rust-lower"
 version = "0.1.0"
 dependencies = [
  "serde",
