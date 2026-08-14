@@ -8,31 +8,33 @@ Row/group counts:
 
 | group (root) | rows |
 |---|---|
+| `/tmp/corpus/glob` | 27 |
 | `/tmp/corpus/itoa` | 7 |
 | `/tmp/corpus/markupsafe` | 47 |
 | `/tmp/corpus/rust-shlex` | 22 |
-| **total** | **76** |
+| **total** | **103** |
 
-Full-data refit (all 3 group(s) pooled): lambda = **1.0** (chosen by inner leave-one-group-out over this profile's groups, inner rho -0.065).
+Full-data refit (all 4 group(s) pooled): lambda = **1.0** (chosen by inner leave-one-group-out over this profile's groups, inner rho -0.063).
 
 | feature | current shipped weight | refit weight (full data) |
 |---|---|---|
-| `current` | +0.1643 | +0.1061 |
-| `schur` | +0.1654 | +0.1177 |
-| `pivot` | +0.1888 | +0.1323 |
-| `trophic` | +0.1092 | +0.1145 |
-| `strahler` | +0.1097 | +0.1282 |
-| `position` | +0.2505 | +0.1081 |
-| `boundary` | -0.0521 | -0.0521 |
+| `current` | +0.1643 | +0.1463 |
+| `schur` | +0.1654 | +0.1404 |
+| `pivot` | +0.1888 | +0.1496 |
+| `trophic` | +0.1092 | +0.1248 |
+| `strahler` | +0.1097 | +0.1532 |
+| `position` | +0.2505 | +0.1050 |
+| `boundary` | -0.0521 | -0.0417 |
 
 Leave-one-group-out evaluation (Spearman rho of each score against `kill_rate`; refit weights for each row are trained on the *other* group(s) in this profile only, never on the held-out group):
 
 | held-out group | n | current weights | refit weights | position alone | inner lambda | inner method |
 |---|---|---|---|---|---|---|
-| `/tmp/corpus/itoa` | 7 | -0.433 | -0.433 | -0.020 | 0.3 | logo |
-| `/tmp/corpus/markupsafe` | 47 | 0.094 | -0.099 | 0.023 | 1.0 | logo |
-| `/tmp/corpus/rust-shlex` | 22 | 0.204 | -0.181 | 0.162 | 0.01 | logo |
-| **mean** | | **-0.045** | **-0.238** | **0.055** | | |
+| `/tmp/corpus/glob` | 27 | 0.025 | 0.025 | -0.025 | 1.0 | logo |
+| `/tmp/corpus/itoa` | 7 | -0.433 | -0.433 | -0.020 | 1.0 | logo |
+| `/tmp/corpus/markupsafe` | 47 | 0.094 | -0.136 | 0.023 | 1.0 | logo |
+| `/tmp/corpus/rust-shlex` | 22 | 0.204 | -0.054 | 0.162 | 0.01 | logo |
+| **mean** | | **-0.028** | **-0.149** | **0.035** | | |
 
 ## `statement` profile (javascript)
 
@@ -68,9 +70,9 @@ Leave-one-group-out evaluation (Spearman rho of each score against `kill_rate`; 
 
 ## Does the refit beat the current weights, held out?
 
-On the `instruction` profile (python + rust, 3 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho -0.238 (refit) vs -0.045 (current), refit winning on 0/3 groups. On the `statement` profile (javascript, 2 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho 0.240 (refit) vs 0.303 (current), refit winning on 1/2 groups.
+On the `instruction` profile (python + rust, 4 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho -0.149 (refit) vs -0.028 (current), refit winning on 0/4 groups. On the `statement` profile (javascript, 2 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho 0.240 (refit) vs 0.303 (current), refit winning on 1/2 groups.
 
 Caveat, and it matters: `kill_rate` measures **behavioural leverage** -- whether a line, when mutated, changes something a test suite can catch. It is not the same target the shipped weights were fitted against. `INSTRUCTION_WEIGHTS` and `STATEMENT_WEIGHTS` (see `crates/vikt-core/src/panel.rs`) were ridge-fitted against a blind expert rater's per-line **reader importance** judgements (`eval/ground-truth-v3.json`, `eval/ground-truth-js-v1.json`) -- what a careful human reading the source, with no scorer output in front of them, marks as mattering. A line can carry high behavioural leverage and low reader importance (an easily-mutated boundary check nobody would call central to the function) or the reverse (a load-bearing structural line a good mutation operator rarely touches). Where this report shows the refit beating the current weights, that is evidence the panel features predict mutation-kill sensitivity better with different coefficients -- it is not evidence the current weights are wrong for the target they were actually fitted against, and it should not be read as license to hand-edit `panel.rs`. Where the refit does not beat the current weights, that says plainly: **it does not**, on this data, at this sample size.
 
-Sample sizes here are small relative to the ground-truth fits (3 groups / 76 rows for `instruction`, 2 groups / 73 rows for `statement`, against 16 functions/425 lines and 9 functions/100 lines respectively) and every group is a different repository rather than a different function within one codebase, so held-out rho here has much higher fold-to-fold variance than the numbers quoted in `panel.rs`'s doc comments. This report should be read as a first behavioural calibration check, not as grounds to replace the shipped weights on its own.
+Sample sizes here are small relative to the ground-truth fits (4 groups / 103 rows for `instruction`); (2 groups / 73 rows for `statement`) against 16 functions/425 lines and 9 functions/100 lines respectively, and every group is a different repository rather than a different function within one codebase, so held-out rho here has much higher fold-to-fold variance than the numbers quoted in `panel.rs`'s doc comments. This report should be read as a first behavioural calibration check, not as grounds to replace the shipped weights on its own.
 

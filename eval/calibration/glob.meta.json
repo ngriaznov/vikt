@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/rust-lang/glob.git",
+  "commit": "cfa2a58f2e44373573f657ec25b3621e44714dee",
+  "language": "rust",
+  "test_cmd": "cargo test --quiet -- --skip test_iteration_errors",
+  "mutants_executed": 48,
+  "invalid": 12,
+  "panel_rho": 0.025,
+  "null_rho": 0.025,
+  "verdict": "uncalibrated"
+}

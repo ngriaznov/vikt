@@ -446,9 +446,12 @@ def write_report(report):
     lines.append("")
     lines.append(
         "Sample sizes here are small relative to the ground-truth fits "
-        "(3 groups / 76 rows for `instruction`, 2 groups / 73 rows for "
-        "`statement`, against 16 functions/425 lines and 9 "
-        "functions/100 lines respectively) and every group is a different "
+        + "; ".join(
+            f"({len(r['groups'])} groups / {r['n_total']} rows for `{profile}`)"
+            for profile, r in report.items()
+        )
+        + " against 16 functions/425 lines and 9 "
+        "functions/100 lines respectively, and every group is a different "
         "repository rather than a different function within one codebase, "
         "so held-out rho here has much higher fold-to-fold variance than "
         "the numbers quoted in `panel.rs`'s doc comments. This report "
