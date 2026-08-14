@@ -6,6 +6,7 @@
 //! vikt foo.py --annotate Foo.py  # tiered source view
 //! vikt Foo.class --stats         # tier histogram and timing
 //! vikt foo.py --format sarif     # SARIF 2.1.0 for code-scanning uploads
+//! vikt foo.py --scope file       # blend in each function's call-graph standing
 //! vikt calibrate src/ --test-cmd "python3 -m unittest"  # self-calibration
 //! vikt calibrate src/ --test-cmd "node --test"          # ...or JS/TS
 //! vikt calibrate pkg/ --test-cmd "cargo test"            # ...or a cargo package
@@ -20,6 +21,7 @@
 
 mod calibrate;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -27,7 +29,8 @@ use std::time::Instant;
 use clap::{Parser, Subcommand, ValueEnum};
 use vikt_core::ir::FunctionIr;
 use vikt_core::{
-    Denylist, PanelProfile, SarifLog, ScoreWeights, Scorer, Sidecar, Tier, analyze_with_scorer,
+    Denylist, FunctionImportance, PanelProfile, SarifLog, ScopedFunction, ScoreWeights, Scorer,
+    Sidecar, Tier, analyze_with_scorer, file_scores, project_to_lines,
 };
 
 /// Output shape.
@@ -51,6 +54,28 @@ enum SarifTier {
     Core,
     /// Frontier lines: returns, throws, state writes, opaque calls.
     Boundary,
+}
+
+/// How wide a lens `--format`, `--annotate` and the sidecar's spans use for
+/// ranking. Tiers are unaffected either way — this only chooses what the
+/// continuous score and rank are measured against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+enum Scope {
+    /// Every score and rank is local to its own function body — today's
+    /// behavior, unaffected by any sibling function in the same file. Two
+    /// different functions' scores are not comparable under this scope.
+    #[default]
+    Function,
+    /// Additionally computes a function-importance layer over the file's
+    /// intra-file call graph (see `vikt_core::filescope`) — fan-in,
+    /// call-graph depth, size and boundary density among the file's other
+    /// functions — and blends it into each line's within-function score,
+    /// then re-ranks every scored line of the file against that blend. Adds
+    /// a `file_score` field to every sidecar span; `score`, `rank` and tiers
+    /// are untouched. A directory or cargo-package input still scopes each
+    /// file to itself — file scope never compares lines across two
+    /// different source files.
+    File,
 }
 
 #[derive(Debug, Parser)]
@@ -117,6 +142,12 @@ struct Args {
     /// assignment is unaffected by this choice.
     #[arg(long, value_enum, default_value_t = ScorerArg::Panel)]
     scorer: ScorerArg,
+
+    /// Rank lines within their own function only (`function`, the default)
+    /// or additionally blend in each function's standing in its file's call
+    /// graph (`file`). See [`Scope`].
+    #[arg(long, value_enum, default_value_t = Scope::Function)]
+    scope: Scope,
 
     /// With a cargo package as input (a directory or Cargo.toml), select one
     /// package of the workspace, as `cargo -p` would.
@@ -302,6 +333,9 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let lowering = lower_started.elapsed();
     let analysis_started = Instant::now();
     let mut analyzed = 0usize;
+    // Retained only under `--scope file`: file scope needs every sibling
+    // function's tiered analysis at once, unlike the push-as-you-go default.
+    let mut scoped: Vec<(&FunctionIr, FunctionImportance)> = Vec::new();
     for ir in &functions {
         if let Err(e) = ir.validate() {
             eprintln!("vikt: skipping {}: {e}", ir.id.name);
@@ -322,8 +356,14 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let sal = analyze_with_scorer(ir, &denylist, &weights, resolve_scorer(args.scorer, ext));
         sidecar.push(ir, &sal);
         analyzed += 1;
+        if args.scope == Scope::File {
+            scoped.push((ir, sal));
+        }
     }
     sidecar.finish();
+    if args.scope == Scope::File {
+        sidecar.apply_file_scope(&file_scope_by_file(&scoped));
+    }
     let analysis = analysis_started.elapsed();
 
     if let Some(note) = note {
@@ -358,7 +398,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(source) = &args.annotate {
-        annotate(source, &sidecar)?;
+        annotate(source, &sidecar, args.scope)?;
     }
 
     if args.stats {
@@ -374,6 +414,50 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Runs [`file_scores`] once per source file among `scoped`, never mixing
+/// lines across files — a directory or cargo-package input can retain
+/// functions from several files at once (crate mode), and file scope must
+/// stay scoped to each one individually.
+fn file_scope_by_file(
+    scoped: &[(&FunctionIr, FunctionImportance)],
+) -> BTreeMap<String, BTreeMap<u32, f64>> {
+    let line_scores: Vec<BTreeMap<u32, f64>> = scoped
+        .iter()
+        .map(|(ir, sal)| per_line_scores(ir, sal))
+        .collect();
+
+    let mut by_file: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, (ir, _)) in scoped.iter().enumerate() {
+        by_file.entry(ir.id.file.as_str()).or_default().push(i);
+    }
+
+    by_file
+        .into_iter()
+        .map(|(file, idxs)| {
+            let functions: Vec<ScopedFunction<'_>> = idxs
+                .iter()
+                .map(|&i| ScopedFunction {
+                    ir: scoped[i].0,
+                    importance: &scoped[i].1,
+                    line_scores: &line_scores[i],
+                })
+                .collect();
+            (file.to_owned(), file_scores(&functions))
+        })
+        .collect()
+}
+
+/// A function's within-function score, per source line: [`project_to_lines`]'s
+/// span-level scores expanded to one entry per line, since
+/// [`ScopedFunction::line_scores`] wants a flat per-line map rather than
+/// runs.
+fn per_line_scores(ir: &FunctionIr, sal: &FunctionImportance) -> BTreeMap<u32, f64> {
+    project_to_lines(ir, sal)
+        .into_iter()
+        .flat_map(|s| (s.start..=s.end).map(move |line| (line, s.score)))
+        .collect()
+}
+
 /// One line per span.
 fn print_text(sidecar: &vikt_core::Sidecar) {
     for f in &sidecar.functions {
@@ -387,8 +471,16 @@ fn print_text(sidecar: &vikt_core::Sidecar) {
             } else {
                 format!("{}-{}", s.start, s.end)
             };
+            // Empty when file scope wasn't requested, so default output
+            // stays byte-identical: `--scope file`'s only text-format
+            // footprint is this one extra column, present exactly where
+            // `file_score` is `Some`.
+            let file_score = s
+                .file_score
+                .map(|v| format!(" file {v:.2}"))
+                .unwrap_or_default();
             println!(
-                "  {range:>9}  {:<9} {:.2}  {}",
+                "  {range:>9}  {:<9} {:.2}{file_score}  {}",
                 s.tier,
                 s.score,
                 s.reasons.first().map_or("", String::as_str)
@@ -397,8 +489,9 @@ fn print_text(sidecar: &vikt_core::Sidecar) {
     }
 }
 
-/// The source with a tier marker per line.
-fn annotate(source: &Path, sidecar: &vikt_core::Sidecar) -> std::io::Result<()> {
+/// The source with a tier marker per line, plus a file-scope score column
+/// when `scope` is [`Scope::File`].
+fn annotate(source: &Path, sidecar: &vikt_core::Sidecar, scope: Scope) -> std::io::Result<()> {
     let text = std::fs::read_to_string(source)?;
     println!("\n--- {} ---", source.display());
     for (i, line) in text.lines().enumerate() {
@@ -410,7 +503,15 @@ fn annotate(source: &Path, sidecar: &vikt_core::Sidecar) -> std::io::Result<()> 
             Some("inert") => "inert",
             _ => "     ",
         };
-        println!("{marker} {n:>4} | {line}");
+        match scope {
+            Scope::Function => println!("{marker} {n:>4} | {line}"),
+            Scope::File => {
+                let file_score = sidecar
+                    .file_score_at(n)
+                    .map_or_else(|| "     ".to_owned(), |v| format!("{v:>5.2}"));
+                println!("{marker} {file_score} {n:>4} | {line}");
+            }
+        }
     }
     Ok(())
 }

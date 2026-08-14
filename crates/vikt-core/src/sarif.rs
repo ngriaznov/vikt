@@ -143,6 +143,15 @@ pub struct Region {
 
 /// The property bag on every result: the same numbers the sidecar carries,
 /// so a SARIF-only consumer can threshold on score without a second parse.
+///
+/// Deliberately does not forward [`SpanRecord::file_score`](crate::artifact::SpanRecord::file_score):
+/// SARIF results are already one-per-line and ordered by [`Sidecar`]'s
+/// function order, never against each other, so there is no ranking here for
+/// file scope to re-rank. A `--scope file` run still emits identical SARIF —
+/// only the sidecar's own `score`/`tier` per line drive a result, exactly as
+/// under the default scope. A future file-scope-aware SARIF consumer would
+/// need an explicit opt-in here, the same way `file_score` is opt-in on the
+/// sidecar itself.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResultProperties {
     /// Continuous importance, `0.0..=1.0`, two decimals as in the sidecar.
