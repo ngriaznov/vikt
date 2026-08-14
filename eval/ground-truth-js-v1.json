@@ -545,32 +545,35 @@
    "name": "aborted",
    "character": "issue-scan predicate",
    "lines": {
-    "818": {
+    "821": {
      "importance": 8,
      "tier": "core",
      "note": "explicit abort short-circuit"
     },
-    "819": {
+    "822": {
      "importance": 8,
      "tier": "core",
      "note": "issue scan"
     },
-    "820": {
+    "823": {
      "importance": 10,
      "tier": "core",
      "note": "THE test: any non-continuing issue aborts"
     },
-    "821": {
+    "824": {
      "importance": 9,
      "tier": "boundary",
      "note": "early true"
     },
-    "824": {
+    "827": {
      "importance": 8,
      "tier": "boundary",
      "note": "default false"
     }
    }
   }
+ ],
+ "notes": [
+  "aborted's five labels shifted +3 (818-824 -> 821-827) after upstream zod moved util.ts between labelling and re-measurement; content verified identical line-by-line before shifting. floatSafeRemainder and pick are unmoved."
  ]
 }

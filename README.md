@@ -126,6 +126,25 @@ a test fails if anyone edits one without re-fitting: the held-out number is
 only true of exactly those values. Tier assignment never varies with scorer
 choice; only the continuous score does.
 
+### Two weight profiles, selected by substrate
+
+The panel carries **two** fitted vectors, because a measured transfer test
+showed the instruments are not equally portable between graph shapes:
+
+- **`Instruction`** — for bytecode frontends (JVM, CPython). The table above.
+- **`Statement`** — for AST frontends (JS/TS). Refit on blind JavaScript /
+  TypeScript labels (9 functions from lodash, express and zod, committed
+  before measurement): strahler and trophic rise to the top instrument
+  weights, schur and pivot fall — statement-granular graphs feed confluence
+  and depth, and starve deletion-sensitivity and reliability.
+
+`--scorer panel` picks the profile from the input extension automatically.
+Evidence: applying the Python-fitted weights to JS zero-shot scored 0.603
+against the blind labels; the Statement profile plus two frontend fixes it
+motivated (closure captures, labelled-continue back edges) took it to
+**0.697**, level with the positional null (0.695) that dominates short
+utility functions, with lodash `memoize` alone improving 0.41 → 0.60.
+
 ## The search: nineteen algorithms, nineteen fields
 
 The selection principle was symmetry across systems. Mature sciences have
@@ -236,6 +255,90 @@ and the held-out evaluation), `panel.py` (a Python reference of the panel that
 the Rust implementation is acceptance-tested against, ρ ≥ 0.996), and
 `RESULTS-leading-algorithms.md` (the full history, including the dead ends
 and the corrections).
+
+## How it works, end to end
+
+Every claim above is produced by one deterministic pipeline. In order:
+
+**1. Lowering — substrate → `FunctionIr`.** Each frontend answers four
+questions per instruction or statement: what source line, what does it
+define, what does it use, where can control go next — plus a kind
+(`Pure`, `Branch`, `Return`, `Throw`, `StateWrite{target}`,
+`Call{callee, opacity}`).
+  - *JVM*: `mokapot` lifts the class file to MokaIR; the `LineNumberTable`
+    maps instructions to lines; JSR-45 SMAP (the `KotlinDebug` stratum)
+    collapses Kotlin inline bodies onto call sites; Kotlin `suspend` state
+    machines are excised so the author's control flow is analyzed, not the
+    compiler's dispatcher.
+  - *CPython*: the system interpreter's own `dis` module is driven through a
+    pinned JSON contract (the analysis never parses Python); PEP 626
+    `co_lines()` gives exact positions; `yield` lowers as a state write —
+    handing a value to the caller is an effect.
+  - *JS/TS*: oxc parses and semantically resolves; def/use comes from real
+    reference resolution, not name matching; every call expression becomes
+    its own node so logging chains stay separable; closures record their
+    captured variables as uses; `catch` bodies are lowered unreachable
+    (a *measured* choice — see below).
+
+**2. Graph analyses, all in `salience-core/src/graph.rs`.** From the raw
+node list: control-flow successors → dominance and post-dominance
+(Cooper-Harvey-Kennedy), control dependence (Ferrante-Ottenstein-Warren),
+natural loops via dominator back edges and per-node loop depth, reaching
+definitions (a fixpoint — frontends need not be SSA), def-use chains, and
+transitive dependence cones via bitset closure in reverse topological order
+over the SCC condensation.
+
+**3. Tiering.** Rules, not weights, and every span carries its reasons:
+  - `boundary`: returns, throws, state writes, calls into opaque
+    dependencies — the frontier where behavior escapes the body.
+  - `inert`: a denylisted call (logging/metrics/tracing across all five
+    languages, `console.*` included), plus every statement that BOTH reaches
+    no useful sink AND feeds a denylisted one — the two-condition rule that
+    keeps `pass` and constants out of the tier — plus the discard of a
+    denylisted result (one forward sweep).
+  - `core`: influence over the body, control-dominance mass, loop-carried
+    dataflow.
+  - `plumbing`: everything present but not behavior-carrying.
+
+**4. The five instruments** score every node independently (each is
+selectable alone via `--scorer` for inspection):
+  - `current` — the hand-tuned blend: forward/backward dependence cones,
+    control mass, loop depth, effect kind, effect proximity.
+  - `schur` — deletion sensitivity in closed form: how much total delivered
+    influence disappears if this node's row and column are removed
+    (Schur-complement identity, exact per SCC).
+  - `pivot` — Birnbaum structural importance at p = ½: how often this node
+    is the pivot between "the function delivers" and "it doesn't"; equals
+    the Banzhaf index, computed by adjoint differentiation.
+  - `trophic` — trophic level: 1 + weighted mean level of what it consumes;
+    basal nodes (parameters, constants) at level 1; cycles solved exactly on
+    the SCC condensation. Derivation depth, made structural.
+  - `strahler` — Horton-Strahler order over pure dataflow: sources are
+    order 1, the order rises only where two equal-order tributaries merge.
+    Finds the mainstem.
+
+**5. The panel** projects each instrument to lines (`max` over a line's
+non-structural nodes), rank-normalises within the function, appends position
+and the boundary flag, and takes the dot product with the substrate profile's
+weights. Inert floors to zero under every scorer.
+
+**6. Projection and artifact.** Per line: strongest tier, panel score,
+within-function percentile `rank` (paint heatmaps from this — it always uses
+the full range), and the sorted reasons. Consecutive lines merge into a span
+only when tier AND score agree, so the gradient survives. Output is a JSON
+sidecar; bodies over `--max-instructions` (default 4096 — every observed
+case is a generated data table) are skipped loudly, never silently.
+
+**Measured design choices worth knowing about** (each has numbers in
+`eval/`): exception edges are OFF everywhere — making handlers reachable
+destroys post-dominance and drags scores toward error paths (0.33 → 0.13
+against expert labels when tried); the semantically faithful CFG is not the
+most useful one for salience. And the evaluation protocol behind every
+number: blind per-line labels committed before measurement
+(`eval/ground-truth-*.json`), leave-one-function-out held-out fits
+(`eval/judgement.py`), a rater-free mutation oracle (`eval/mutation_oracle.py`),
+and null-model controls — the positional null is reported next to every
+headline because reader labels are demonstrably position-correlated.
 
 ## Calibration
 
@@ -480,13 +583,17 @@ salience Foo.class --annotate Foo.java      # tiered source view
 salience Foo.class --stats                  # histogram and timing
 salience Foo.class --inert 'com.acme.Audit' # extend the denylist
 salience Foo.class --no-denylist            # treat nothing as inert
+salience app.ts                             # TS/JS: statement-profile panel
 salience foo.py --scorer strahler           # one instrument alone
 salience foo.py --scorer current            # the incumbent alone
+salience big.py --max-instructions 0        # lift the data-table size guard
 ```
 
 `--scorer` selects which algorithm produces the continuous score: `panel`
 (default), or any single instrument — `current`, `schur`, `pivot`, `trophic`,
-`strahler`. Tier assignment is identical under every choice.
+`strahler`. The panel's weight profile follows the input substrate
+automatically (bytecode → Instruction, JS/TS → Statement). Tier assignment
+is identical under every choice.
 
 Reproduce the scale run (fetches six production codebases, ~2M instructions,
 and prints the per-corpus summary; see `eval/RESULTS-corpus-scale.md` for the
@@ -539,12 +646,21 @@ that genuinely has no core.
 
 ## Performance
 
-Release build, 3-method class, 62 instructions:
+Measured at scale on production code (single thread, panel scorer, release
+build; `eval/fetch-corpus.sh && eval/run-corpus.sh` reproduces):
 
-```
-lowering    546µs   (file read + class parse + MokaIR lift)
-analysis    202µs   -> 67µs per function
-```
+| corpus | functions | p50 / fn | p99 / fn | wall |
+|---|---|---|---|---|
+| Python stdlib (complete) | 18,888 | 103 µs | 8.8 ms | 87 s |
+| django + sqlalchemy + flask + rich | 31,257 | ~100 µs | < 9 ms | 130 s |
+| guava + gson + commons-lang3 (JVM) | 18,449 | 32 µs | 0.8 ms | 3.9 s |
+| lodash + zod (JS/TS) | 16,413 | ~30 µs | < 1 ms | 5.6 s |
+
+Zero parse failures and zero panics on all of it; 99–100% of instructions
+carry a source line. Wall time on Python is dominated by the per-file
+CPython lowering subprocess; JVM and JS/TS lower in-process. Running all
+five instruments costs ~12% over the incumbent alone — invisible in wall
+time.
 
 Lowering and analysis are reported apart because they are paid at different
 times. Lowering happens once per file. Analysis is the part that would run

@@ -86,9 +86,12 @@ impl Stats {
         let started = Instant::now();
         // SALIENCE_SCORER=current measures the incumbent alone; default is the
         // shipped panel, so the numbers reported are the numbers users get.
+        // This harness only ever runs over jvm/py corpora (see the module
+        // doc), both bytecode-granular, so the instruction profile is
+        // correct unconditionally here - no extension dispatch needed.
         let scorer = match std::env::var("SALIENCE_SCORER").as_deref() {
             Ok("current") => Scorer::Current,
-            _ => Scorer::Panel,
+            _ => Scorer::Panel(salience_core::PanelProfile::Instruction),
         };
         let sal = analyze_with_scorer(ir, &Denylist::new(), &ScoreWeights::default(), scorer);
         let elapsed = started.elapsed();
