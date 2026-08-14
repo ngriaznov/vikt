@@ -595,6 +595,15 @@ salience big.py --max-instructions 0        # lift the data-table size guard
 automatically (bytecode → Instruction, JS/TS → Statement). Tier assignment
 is identical under every choice.
 
+**Do not score with a single instrument.** The panel is the product; the
+single-instrument flags exist for measurement, audit, and regression
+pinning only. Every solo instrument has been measured at or below a
+positional null against expert judgement, and every one has functions it
+ranks *backwards* — the panel beats them all precisely because their
+failures do not overlap. Use a single instrument to re-fit weights against
+new labels, to see which facet drove a surprising score, or to verify a
+refactor left a member byte-identical — never as the score a consumer reads.
+
 Reproduce the scale run (fetches six production codebases, ~2M instructions,
 and prints the per-corpus summary; see `eval/RESULTS-corpus-scale.md` for the
 measured results):

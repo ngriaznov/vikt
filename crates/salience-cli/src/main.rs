@@ -90,22 +90,28 @@ struct Args {
 /// CLI surface of [`Scorer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ScorerArg {
-    /// The fitted five-instrument combination - the shipped default. Which
-    /// of the two fitted weight vectors is used is substrate-selected
-    /// automatically from the input's extension, not a flag: bytecode
-    /// inputs (.class, .py) get the instruction-granular fit, JS/TS inputs
-    /// get the statement-granular fit. See salience-core's `panel` module
-    /// for provenance of both.
+    /// The fitted five-instrument combination - the shipped default, and the
+    /// only variant intended for consumers. Which of the two fitted weight
+    /// vectors is used is substrate-selected automatically from the input's
+    /// extension, not a flag: bytecode inputs (.class, .py) get the
+    /// instruction-granular fit, JS/TS inputs get the statement-granular
+    /// fit. See salience-core's `panel` module for provenance of both.
+    ///
+    /// The single-instrument variants below are for measurement, audit and
+    /// regression pinning ONLY. Every one has been measured at or below a
+    /// positional null against expert judgement, and every one has functions
+    /// it ranks backwards; the panel beats them all because their failures
+    /// do not overlap. Do not ship a single instrument's score.
     Panel,
-    /// The incumbent hand-tuned blend, alone.
+    /// The incumbent hand-tuned blend, alone. Measurement/audit only.
     Current,
-    /// Schur-complement deletion sensitivity, alone.
+    /// Schur-complement deletion sensitivity, alone. Measurement/audit only.
     Schur,
-    /// Birnbaum structural importance, alone.
+    /// Birnbaum structural importance, alone. Measurement/audit only.
     Pivot,
-    /// Trophic-level derivation depth, alone.
+    /// Trophic-level derivation depth, alone. Measurement/audit only.
     Trophic,
-    /// Horton-Strahler confluence order, alone.
+    /// Horton-Strahler confluence order, alone. Measurement/audit only.
     Strahler,
 }
 
