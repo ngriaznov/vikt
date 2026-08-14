@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Compiled fixtures for the demo
+demo/**/*.class
+__pycache__/
+*.pyc
+demo/kotlin/out/
+demo/**/*.jar
+corpus/
+eval/corpus-logs/

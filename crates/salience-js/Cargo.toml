@@ -1,0 +1,21 @@
+[package]
+name = "salience-js"
+version = "0.1.0"
+description = "JavaScript / TypeScript frontend for salience-core, lowering from oxc's semantic-resolved AST"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+salience-core = { workspace = true }
+thiserror = { workspace = true }
+oxc_allocator = "0.144"
+oxc_ast = "0.144"
+oxc_parser = "0.144"
+oxc_semantic = "0.144"
+oxc_span = "0.144"
+oxc_syntax = "0.144"
+
+[lints]
+workspace = true

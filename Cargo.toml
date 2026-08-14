@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ngriaznov/weightloss"
+
+[workspace.dependencies]
+salience-core = { path = "crates/salience-core" }
+salience-jvm = { path = "crates/salience-jvm" }
+salience-js = { path = "crates/salience-js" }
+salience-py = { path = "crates/salience-py" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+
+# MokaIR — the SSA IR, CFG and def-use chains the JVM frontend lowers from —
+# sits behind mokapot's `unstable-moka-ir` feature. The name is accurate: the
+# module is `pub(crate)` without it, and the API carries no stability promise
+# across 0.x releases. Pinned exactly, and bumped deliberately.
+mokapot = { version = "=0.26.0", features = ["unstable-moka-ir"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
