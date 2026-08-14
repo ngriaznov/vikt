@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/pallets/markupsafe.git",
+  "commit": "b2e4d9c7687be25695fffbe93a37622302b24fb1",
+  "language": "python",
+  "test_cmd": "PYTHONPATH=src python3 -m pytest -x -q",
+  "mutants_executed": 150,
+  "invalid": 0,
+  "panel_rho": 0.123,
+  "null_rho": 0.262,
+  "verdict": "uncalibrated"
+}
