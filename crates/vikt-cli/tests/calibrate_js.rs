@@ -225,3 +225,41 @@ fn typescript_sources_print_the_type_check_caveat() {
         "stdout:\n{stdout}"
     );
 }
+
+/// The type-check caveat is keyed to the scored file set, not every
+/// discovered JS/TS file: a tree whose only `.ts` file is a test (excluded
+/// from scoring by the `.test.ts` convention) must not print it.
+#[test]
+fn typescript_test_file_alone_does_not_print_the_caveat() {
+    if !node_available() {
+        eprintln!("skipping: node not on PATH");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("vikt-calibrate-ts-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir is writable");
+    std::fs::write(
+        dir.join("clamp.js"),
+        "function clamp(value) {\n  const scale = 1 * 1;\n  if (value < 0) {\n    return 0;\n  }\n  return value;\n}\nmodule.exports = { clamp };\n",
+    )
+    .expect("temp file");
+    std::fs::write(
+        dir.join("clamp.test.ts"),
+        "import { clamp } from \"./clamp.js\";\ntest(\"clamp\", () => {\n  expect(clamp(5)).toBe(5);\n});\n",
+    )
+    .expect("temp file");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args(["calibrate"])
+        .arg(&dir)
+        .args(["--test-cmd", "true", "--budget", "5"])
+        .output()
+        .expect("running the vikt binary");
+    let _ = std::fs::remove_dir_all(&dir);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "stdout:\n{stdout}");
+    assert!(
+        !stdout.contains("TypeScript sources among the scored files"),
+        "the only .ts file is a test file, excluded from scoring\nstdout:\n{stdout}"
+    );
+}

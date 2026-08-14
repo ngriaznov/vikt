@@ -123,8 +123,13 @@ pub fn mutants_for(path: &Path, spans: &[(u32, u32)], limit: usize) -> std::io::
         }
         // Integer literals: digits not adjacent to an identifier or a float
         // point. `0 -> 1`, `1 -> 0`, otherwise `n -> n+1`; suffixes
-        // (`10u32`) survive because only the digit run is replaced.
-        if b.is_ascii_digit() && !prev.is_ascii_alphanumeric() && prev != b'_' && prev != b'.' {
+        // (`10u32`) survive because only the digit run is replaced. A `prev`
+        // byte >= 0x80 is a UTF-8 continuation byte: within masked code
+        // that only occurs inside a Unicode identifier (`café2`), never on
+        // its own, so it blocks a digit run exactly like an ASCII
+        // alphanumeric would.
+        let prev_is_ident = prev.is_ascii_alphanumeric() || prev == b'_' || prev >= 0x80;
+        if b.is_ascii_digit() && !prev_is_ident && prev != b'.' {
             let start = i;
             while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'_') {
                 i += 1;
@@ -233,23 +238,7 @@ fn code_mask(src: &str) -> Vec<bool> {
             }
             // A char literal, as opposed to a lifetime: `'x'` or `'\...'`.
             b'\'' if b.get(i + 1) == Some(&b'\\') || b.get(i + 2) == Some(&b'\'') => {
-                mask[i] = false;
-                i += 1;
-                if b.get(i) == Some(&b'\\') {
-                    mask[i] = false;
-                    i += 1;
-                    if i < b.len() {
-                        mask[i] = false;
-                        i += 1;
-                    }
-                } else if i < b.len() {
-                    mask[i] = false;
-                    i += 1;
-                }
-                if b.get(i) == Some(&b'\'') {
-                    mask[i] = false;
-                    i += 1;
-                }
+                i = mask_char_literal(b, &mut mask, i);
             }
             _ => i += 1,
         }
@@ -271,6 +260,31 @@ fn mask_string(b: &[u8], mask: &mut [bool], open: usize, _hashes: usize) -> usiz
                 mask[i] = false;
             }
         } else if b[i] == b'"' {
+            return i + 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+/// A `'`-delimited char literal starting at `open` (the caller has already
+/// ruled out a lifetime); returns the index after the closing quote. Mirrors
+/// `mask_string`'s escape handling so a multi-byte escape body (`\x41`,
+/// `\u{2764}`) is masked in full rather than just the byte right after the
+/// backslash — the previous single-step version left interior escape bytes
+/// unmasked, so they could surface as (invalid) mutation sites.
+fn mask_char_literal(b: &[u8], mask: &mut [bool], open: usize) -> usize {
+    let mut i = open;
+    mask[i] = false;
+    i += 1;
+    while i < b.len() {
+        mask[i] = false;
+        if b[i] == b'\\' {
+            i += 1;
+            if i < b.len() {
+                mask[i] = false;
+            }
+        } else if b[i] == b'\'' {
             return i + 1;
         }
         i += 1;
@@ -395,6 +409,47 @@ mod tests {
             assert!(
                 m.source.contains("->") && m.source.contains("=>"),
                 "arrow tokens must survive every mutant: {}",
+                m.detail
+            );
+        }
+    }
+
+    /// A multi-byte escape body (`\u{...}`) inside a char literal is masked
+    /// in full, not just its first byte: the digits and braces inside it
+    /// must never surface as (invalid) mutation sites.
+    #[test]
+    fn unicode_escape_char_literal_is_fully_masked() {
+        let set = mutants_of(
+            "fn f(a: i64) -> i64 {\n    let c = '\\u{2764}';\n    a + 1\n}\n",
+            &[(1, 4)],
+        );
+        assert!(
+            set.mutants.iter().all(|m| m.line == 3),
+            "only line 3's code may mutate; the char literal on line 2 must stay untouched, got lines {:?}",
+            set.mutants.iter().map(|m| m.line).collect::<Vec<_>>()
+        );
+    }
+
+    /// A digit run right after a non-ASCII identifier byte (a UTF-8
+    /// continuation byte, always >= 0x80) belongs to the identifier, not a
+    /// standalone integer literal — `café2` must not be spliced into
+    /// `café3`.
+    #[test]
+    fn digit_after_non_ascii_identifier_is_not_mutated() {
+        let set = mutants_of(
+            "fn f(caf\u{e9}2: i64) -> i64 {\n    caf\u{e9}2 + 1\n}\n",
+            &[(1, 3)],
+        );
+        let consts: Vec<_> = set.mutants.iter().filter(|m| m.kind == "const").collect();
+        assert!(
+            consts.iter().all(|m| m.detail == "1 -> 0"),
+            "only the standalone `1` literal may mutate, got {:?}",
+            consts.iter().map(|m| &m.detail).collect::<Vec<_>>()
+        );
+        for m in &set.mutants {
+            assert!(
+                m.source.matches("caf\u{e9}2").count() == 2,
+                "both occurrences of the identifier must survive every mutant: {}",
                 m.detail
             );
         }

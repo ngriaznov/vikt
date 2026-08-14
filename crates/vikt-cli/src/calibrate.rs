@@ -356,7 +356,7 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         score_by_majority(&copy.root, &scan, &args.python)
     };
 
-    if lang == Language::JavaScript && scan.js.iter().any(|p| is_typescript(p)) {
+    if lang == Language::JavaScript && scored.iter().any(|f| is_typescript(&f.file)) {
         println!(
             "calibrate: TypeScript sources among the scored files — a mutant that fails the \
 repository's own type check is read as killed, indistinguishable from one an actual test caught"
@@ -563,7 +563,24 @@ fn score_functions(
     file_scores: &mut FileScores,
 ) {
     for ir in functions {
-        if ir.validate().is_err() || ir.is_empty() || ir.len() > MAX_INSTRUCTIONS {
+        if let Err(e) = ir.validate() {
+            eprintln!(
+                "calibrate: skipping {} in {}: {e}",
+                ir.id.name,
+                rel.display()
+            );
+            continue;
+        }
+        if ir.is_empty() {
+            continue;
+        }
+        if ir.len() > MAX_INSTRUCTIONS {
+            eprintln!(
+                "calibrate: skipping {} in {} ({} instructions > {MAX_INSTRUCTIONS})",
+                ir.id.name,
+                rel.display(),
+                ir.len()
+            );
             continue;
         }
         // Synthetic wrapper functions overlap the extent of a real def;
@@ -1116,15 +1133,14 @@ impl TempTree {
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            // A symlink keeps a large dependency tree free: nothing under
-            // it is scored or mutated, so the copy only needs it to exist
-            // for `node`/`npm` to resolve `require`/`import`. Falls back to
-            // a full recursive copy when symlinking cannot work — a
-            // sandbox without that permission, or a temp dir on another
-            // filesystem than the source tree.
-            if symlink(src.join(rel), &dst).is_err() {
-                copy_dir_all(&src.join(rel), &dst)?;
-            }
+            // A symlink to the source tree would be cheaper, but a
+            // `require`/`import` resolved into it can run the dependency's
+            // own build tooling (postinstall scripts, bundler caches) —
+            // writes that would land in the real tree through the link.
+            // The invariant that the input tree is never opened for
+            // writing holds only by copying node_modules fully, same as
+            // every other file in the tree.
+            copy_dir_all(&src.join(rel), &dst)?;
         }
         Ok(tree)
     }
@@ -1311,5 +1327,37 @@ mod tests {
         // Python excludes lambdas would drop most real JS code.
         assert!(!Language::JavaScript.is_synthetic("<fn@12>"));
         assert!(!Language::JavaScript.is_synthetic("checkout"));
+    }
+
+    /// `node_modules` lands in the copy as a real directory, never a
+    /// symlink back to the source tree — a symlink would let the test
+    /// command's own tooling (build caches, postinstall scripts) write
+    /// through it into the real project, violating the "input tree is
+    /// never opened for writing" invariant documented at the top of this
+    /// module.
+    #[test]
+    fn node_modules_is_copied_not_symlinked() {
+        let src = std::env::temp_dir().join(format!(
+            "vikt-calibrate-nm-src-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&src);
+        std::fs::create_dir_all(src.join("node_modules/leftpad")).unwrap();
+        std::fs::write(
+            src.join("node_modules/leftpad/index.js"),
+            b"module.exports = 1;\n",
+        )
+        .unwrap();
+
+        let tree = TempTree::create(&src, &[], &[PathBuf::from("node_modules")]).unwrap();
+        let copied = tree.root.join("node_modules");
+        assert!(
+            !copied.symlink_metadata().unwrap().file_type().is_symlink(),
+            "node_modules in the copy must be a real directory, not a symlink to the source"
+        );
+        assert!(copied.join("leftpad/index.js").is_file());
+
+        let _ = std::fs::remove_dir_all(&src);
     }
 }
