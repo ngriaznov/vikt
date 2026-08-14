@@ -27,10 +27,11 @@ use crate::ir::FunctionIr;
 /// such a change: it is optional, defaults to absent, and every struct here
 /// derives plain `Serialize`/`Deserialize` with no `deny_unknown_fields`, so
 /// an old reader ignores the new key and a new reader sees `None` on output
-/// that never set it. Single-file, default-scope output is unaffected byte
-/// for byte. Reserve the next schema bump for a change that removes,
-/// renames, or repurposes an existing field's meaning.
-pub const SCHEMA: &str = "vikt-sidecar/v1";
+/// that never set it. Reserve schema bumps for changes that remove, rename,
+/// or repurpose an existing field's meaning — exactly what v2 is: v1's
+/// per-span `score` is `function_score` from v2 on, renamed so its scope is
+/// unambiguous next to `file_score`.
+pub const SCHEMA: &str = "vikt-sidecar/v2";
 
 /// One tiered run of source lines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,11 +44,11 @@ pub struct SpanRecord {
     pub tier: String,
     /// Continuous importance against a fixed scale, `0.0..=1.0`. Use for
     /// thresholds and policy.
-    pub score: f64,
+    pub function_score: f64,
     /// Percentile of that score within this function, `0.0..=1.0`. Use for
     /// heatmaps and for "show me the top of this body".
     pub rank: f64,
-    /// File-scope score: [`score`](Self::score) reweighted by the owning
+    /// File-scope score: [`function_score`](Self::function_score) reweighted by the owning
     /// function's call-graph standing among its file's other functions, then
     /// rank-normalised across every scored line of the file (see
     /// [`crate::filescope`]). Present only when the run asked for file
@@ -69,7 +70,7 @@ impl SpanRecord {
             // Two decimals: the score is a ranking signal, and pretending to
             // more precision than the weights justify invites false diffs
             // between runs on trivially different inputs.
-            score: (s.score * 100.0).round() / 100.0,
+            function_score: (s.score * 100.0).round() / 100.0,
             rank: (s.rank * 100.0).round() / 100.0,
             file_score: None,
             reasons: s.reasons.clone(),
@@ -208,7 +209,7 @@ impl Sidecar {
     /// over `--max-instructions` never contributes lines — keeps
     /// `file_score: None` rather than guessing. A span spanning more than
     /// one scored line takes the highest of its lines' scores, the same
-    /// `max`-over-the-run convention [`SpanRecord::score`] itself already
+    /// `max`-over-the-run convention [`SpanRecord::function_score`] itself already
     /// uses.
     pub fn apply_file_scope(&mut self, by_file: &BTreeMap<String, BTreeMap<u32, f64>>) {
         let sidecar_file = self.file.clone();

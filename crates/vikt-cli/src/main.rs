@@ -482,7 +482,7 @@ fn print_text(sidecar: &vikt_core::Sidecar) {
             println!(
                 "  {range:>9}  {:<9} {:.2}{file_score}  {}",
                 s.tier,
-                s.score,
+                s.function_score,
                 s.reasons.first().map_or("", String::as_str)
             );
         }

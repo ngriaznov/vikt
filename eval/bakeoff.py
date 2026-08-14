@@ -73,8 +73,8 @@ def line_scores(binary, flag, path):
     for f in doc["functions"]:
         for sp in f["spans"]:
             for ln in range(sp["start"], sp["end"] + 1):
-                if ln not in got or sp["score"] > got[ln]:
-                    got[ln] = sp["score"]
+                if ln not in got or sp["function_score"] > got[ln]:
+                    got[ln] = sp["function_score"]
     return got, dt, doc
 
 
@@ -83,7 +83,7 @@ def resolution(doc):
     per_fn = []
     allv = set()
     for f in doc["functions"]:
-        vals = [sp["score"] for sp in f["spans"]]
+        vals = [sp["function_score"] for sp in f["spans"]]
         if len(vals) < 3:
             continue
         allv.update(round(v, 6) for v in vals)

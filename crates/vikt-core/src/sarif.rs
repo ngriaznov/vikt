@@ -212,7 +212,7 @@ impl SarifLog {
                         // it rather than carrying a scorer field the artifact
                         // does not have.
                         message: Message {
-                            text: format!("{} line (panel {:.2})", s.tier, s.score),
+                            text: format!("{} line (panel {:.2})", s.tier, s.function_score),
                         },
                         locations: vec![Location {
                             physical_location: PhysicalLocation {
@@ -221,7 +221,7 @@ impl SarifLog {
                             },
                         }],
                         properties: ResultProperties {
-                            score: s.score,
+                            score: s.function_score,
                             tier: s.tier.clone(),
                         },
                     });

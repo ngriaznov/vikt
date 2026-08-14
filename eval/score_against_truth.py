@@ -68,8 +68,8 @@ def main():
         for f in doc["functions"]:
             for sp in f["spans"]:
                 for ln in range(sp["start"], sp["end"] + 1):
-                    if ln not in got or sp["score"] > got[ln]:
-                        got[ln] = sp["score"]
+                    if ln not in got or sp["function_score"] > got[ln]:
+                        got[ln] = sp["function_score"]
 
         pairs = []
         missing = []

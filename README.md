@@ -471,7 +471,7 @@ Both demos are the same program in two languages, and produce the same tiering.
 
 ```json
 {
-  "schema": "vikt-sidecar/v1",
+  "schema": "vikt-sidecar/v2",
   "generator": "vikt-jvm/mokapot",
   "file": "OrderProcessor.java",
   "functions": [{
@@ -481,10 +481,10 @@ Both demos are the same program in two languages, and produce the same tiering.
     "coverage": { "instructions": 55, "with_line": 55 },
     "summary": { "core": 6, "boundary": 2, "plumbing": 1, "inert": 4 },
     "spans": [
-      { "start": 21, "end": 21, "tier": "core", "score": 0.8,
+      { "start": 21, "end": 21, "tier": "core", "function_score": 0.8,
         "reasons": ["loop-carried definition at nesting depth 1",
                     "reaches state write OrderProcessor#runningTotal in 1 dependence step(s)"] },
-      { "start": 22, "end": 22, "tier": "inert", "score": 0.0,
+      { "start": 22, "end": 22, "tier": "inert", "function_score": 0.0,
         "reasons": ["builds arguments for a denylisted call only"] }
     ]
   }]

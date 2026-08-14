@@ -35,10 +35,10 @@ fn peak_file_score(v: &serde_json::Value, name: &str) -> f64 {
     let peak = spans
         .iter()
         .max_by(|a, b| {
-            a["score"]
+            a["function_score"]
                 .as_f64()
                 .unwrap()
-                .partial_cmp(&b["score"].as_f64().unwrap())
+                .partial_cmp(&b["function_score"].as_f64().unwrap())
                 .unwrap()
         })
         .unwrap_or_else(|| panic!("{name} has no spans"));

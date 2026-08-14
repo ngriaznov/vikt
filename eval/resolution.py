@@ -68,7 +68,7 @@ def main():
             wall += dt
             slowest = max(slowest, dt)
             for f in doc["functions"]:
-                vals = [s["score"] for s in f["spans"]]
+                vals = [s["function_score"] for s in f["spans"]]
                 if len(vals) < 3:
                     continue
                 nfn += 1
