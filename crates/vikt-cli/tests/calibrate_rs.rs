@@ -86,6 +86,8 @@ fn calibrates_the_rust_fixture_and_leaves_it_untouched() {
             "24",
             "--timeout-secs",
             "240",
+            "--scope",
+            "function",
         ])
         .env("VIKT_RUST_LOWER", &helper)
         .output()

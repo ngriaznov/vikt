@@ -61,10 +61,9 @@ enum SarifTier {
 /// continuous score and rank are measured against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 enum Scope {
-    /// Every score and rank is local to its own function body — today's
-    /// behavior, unaffected by any sibling function in the same file. Two
-    /// different functions' scores are not comparable under this scope.
-    #[default]
+    /// Every score and rank is local to its own function body, unaffected
+    /// by any sibling function in the same file. Two different functions'
+    /// scores are not comparable under this scope.
     Function,
     /// Additionally computes a function-importance layer over the file's
     /// intra-file call graph (see `vikt_core::filescope`) — fan-in,
@@ -75,6 +74,7 @@ enum Scope {
     /// are untouched. A directory or cargo-package input still scopes each
     /// file to itself — file scope never compares lines across two
     /// different source files.
+    #[default]
     File,
 }
 
@@ -143,10 +143,10 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ScorerArg::Panel)]
     scorer: ScorerArg,
 
-    /// Rank lines within their own function only (`function`, the default)
-    /// or additionally blend in each function's standing in its file's call
-    /// graph (`file`). See [`Scope`].
-    #[arg(long, value_enum, default_value_t = Scope::Function)]
+    /// Blend each function's standing in its file's call graph into every
+    /// line's score (`file`, the default) or rank lines within their own
+    /// function only (`function`). See [`Scope`].
+    #[arg(long, value_enum, default_value_t = Scope::File)]
     scope: Scope,
 
     /// With a cargo package as input (a directory or Cargo.toml), select one

@@ -78,9 +78,24 @@ pub struct ScopedFunction<'a> {
 #[must_use]
 pub fn file_scores(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, f64> {
     let weights = function_weights(functions);
+    let owners = line_owners(functions);
+    let lines: Vec<u32> = owners.keys().copied().collect();
+    let raw: Vec<f64> = lines
+        .iter()
+        .map(|line| {
+            let i = owners[line];
+            weights[i] * functions[i].line_scores.get(line).copied().unwrap_or(0.0)
+        })
+        .collect();
+    lines.into_iter().zip(rank01(&raw)).collect()
+}
 
-    // Narrowest-extent-wins ownership, first-encountered breaking ties -
-    // the same rule `vikt-cli`'s calibration uses for nested attribution.
+/// Per-line owning function index into `functions`, by the attribution rule
+/// [`file_scores`] blends with: narrowest scored-line extent wins, the
+/// first-encountered function breaking ties. Public so consumers reporting
+/// per-line data (calibration's dataset rows) attribute it identically.
+#[must_use]
+pub fn line_owners(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, usize> {
     let mut owner: BTreeMap<u32, (usize, u32)> = BTreeMap::new();
     for (i, f) in functions.iter().enumerate() {
         let Some(&lo) = f.line_scores.keys().next() else {
@@ -99,16 +114,7 @@ pub fn file_scores(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, f64> {
                 .or_insert((i, width));
         }
     }
-
-    let lines: Vec<u32> = owner.keys().copied().collect();
-    let raw: Vec<f64> = lines
-        .iter()
-        .map(|line| {
-            let &(i, _) = &owner[line];
-            weights[i] * functions[i].line_scores.get(line).copied().unwrap_or(0.0)
-        })
-        .collect();
-    lines.into_iter().zip(rank01(&raw)).collect()
+    owner.into_iter().map(|(line, (i, _))| (line, i)).collect()
 }
 
 /// A function's four rank-normalised call-graph signals, individually —

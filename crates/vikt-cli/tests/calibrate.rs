@@ -61,6 +61,8 @@ fn calibrates_the_fixture_and_leaves_it_untouched() {
             "--test-cmd",
             "python3 -m unittest discover",
             "--gate",
+            "--scope",
+            "function",
         ])
         .output()
         .expect("running the vikt binary");

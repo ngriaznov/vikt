@@ -96,7 +96,7 @@ pub mod trophic;
 pub use artifact::{Sidecar, SpanRecord};
 pub use calibration::{Verdict, spearman, verdict};
 pub use filescope::{
-    FunctionFeatures, ScopedFunction, file_scores, function_features, function_weights,
+    FunctionFeatures, ScopedFunction, file_scores, function_features, function_weights, line_owners,
 };
 pub use graph::Graph;
 pub use importance::{

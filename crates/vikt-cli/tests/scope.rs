@@ -47,40 +47,45 @@ fn peak_file_score(v: &serde_json::Value, name: &str) -> f64 {
         .unwrap_or_else(|| panic!("{name}'s peak span has no file_score: {peak}"))
 }
 
-/// Without `--scope`, no span anywhere carries a `file_score` key at all -
-/// the field is skipped, not merely `null`, so old readers see exactly the
-/// artifact they saw before this feature existed.
+/// Under `--scope function`, no span anywhere carries a `file_score` key at
+/// all - the field is skipped, not merely `null`, so readers opting out of
+/// file scope see exactly the artifact this tool emitted before the feature
+/// existed.
 #[test]
-fn default_scope_omits_file_score_entirely() {
-    let v = run(&[]);
+fn function_scope_omits_file_score_entirely() {
+    let v = run(&["--scope", "function"]);
     for f in v["functions"].as_array().unwrap() {
         for s in f["spans"].as_array().unwrap() {
             assert!(
                 s.get("file_score").is_none(),
-                "default scope must omit file_score, found it on {s}"
+                "function scope must omit file_score, found it on {s}"
             );
         }
     }
 }
 
-/// `--scope function` is the default spelled out; its JSON output must be
-/// byte-identical to a bare invocation.
+/// `--scope file` is the default spelled out; its JSON output must be
+/// byte-identical to a bare invocation, and a bare invocation carries
+/// `file_score` spans.
 #[test]
-fn explicit_function_scope_is_byte_identical_to_default() {
+fn explicit_file_scope_is_byte_identical_to_default() {
     let bare = Command::new(env!("CARGO_BIN_EXE_vikt"))
         .arg(FIXTURE)
         .output()
         .expect("running the vikt binary");
     let explicit = Command::new(env!("CARGO_BIN_EXE_vikt"))
         .arg(FIXTURE)
-        .args(["--scope", "function"])
+        .args(["--scope", "file"])
         .output()
         .expect("running the vikt binary");
     assert!(bare.status.success() && explicit.status.success());
     assert_eq!(
         bare.stdout, explicit.stdout,
-        "--scope function must not change a single byte of the default output"
+        "--scope file must not change a single byte of the default output"
     );
+    let v: serde_json::Value = serde_json::from_slice(&bare.stdout).unwrap();
+    // Panics if the default output lacks file_score spans.
+    let _ = peak_file_score(&v, "hub");
 }
 
 /// Under `--scope file`, the hub's own peak line outranks every wrapper's
@@ -104,7 +109,7 @@ fn file_scope_ranks_the_hub_above_its_wrappers() {
 /// to the default run, only `file_score` is added.
 #[test]
 fn file_scope_leaves_tiers_untouched() {
-    let function_scope = run(&[]);
+    let function_scope = run(&["--scope", "function"]);
     let file_scope = run(&["--scope", "file"]);
     let tiers = |v: &serde_json::Value| -> Vec<(String, String, String)> {
         v["functions"]
@@ -126,35 +131,35 @@ fn file_scope_leaves_tiers_untouched() {
     assert_eq!(tiers(&function_scope), tiers(&file_scope));
 }
 
-/// `--annotate` under file scope adds a score column; under the default
-/// scope its shape is unchanged.
+/// `--annotate` carries the file-score column by default; `--scope
+/// function` drops it.
 #[test]
-fn annotate_adds_a_column_only_under_file_scope() {
+fn annotate_column_present_by_default_absent_under_function_scope() {
     let default_out = Command::new(env!("CARGO_BIN_EXE_vikt"))
         .arg(FIXTURE)
         .args(["--annotate", FIXTURE])
         .output()
         .expect("running the vikt binary");
-    let file_out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+    let function_out = Command::new(env!("CARGO_BIN_EXE_vikt"))
         .arg(FIXTURE)
-        .args(["--scope", "file", "--annotate", FIXTURE])
+        .args(["--scope", "function", "--annotate", FIXTURE])
         .output()
         .expect("running the vikt binary");
-    assert!(default_out.status.success() && file_out.status.success());
+    assert!(default_out.status.success() && function_out.status.success());
 
     let default_text = String::from_utf8_lossy(&default_out.stdout);
-    let file_text = String::from_utf8_lossy(&file_out.stdout);
+    let function_text = String::from_utf8_lossy(&function_out.stdout);
     let default_line = default_text
         .lines()
         .find(|l| l.contains("function hub"))
         .expect("annotated hub declaration line, default scope");
-    let file_line = file_text
+    let function_line = function_text
         .lines()
         .find(|l| l.contains("function hub"))
-        .expect("annotated hub declaration line, file scope");
+        .expect("annotated hub declaration line, function scope");
     assert!(
-        file_line.len() > default_line.len(),
-        "file scope should add a score column: {default_line:?} vs {file_line:?}"
+        default_line.len() > function_line.len(),
+        "default (file) scope should carry the score column: {function_line:?} vs {default_line:?}"
     );
 }
 
@@ -180,23 +185,23 @@ fn sarif_output_is_unaffected_by_scope() {
     );
 }
 
-/// `--format text` under file scope names the extra column; under the
-/// default scope the line is unchanged.
+/// `--format text` names the file-score column by default; `--scope
+/// function` drops it.
 #[test]
-fn text_format_adds_file_score_only_under_file_scope() {
+fn text_format_carries_file_score_by_default_not_under_function_scope() {
     let default_out = Command::new(env!("CARGO_BIN_EXE_vikt"))
         .arg(FIXTURE)
         .args(["--format", "text"])
         .output()
         .expect("running the vikt binary");
-    let file_out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+    let function_out = Command::new(env!("CARGO_BIN_EXE_vikt"))
         .arg(FIXTURE)
-        .args(["--format", "text", "--scope", "file"])
+        .args(["--format", "text", "--scope", "function"])
         .output()
         .expect("running the vikt binary");
-    assert!(default_out.status.success() && file_out.status.success());
+    assert!(default_out.status.success() && function_out.status.success());
     let default_text = String::from_utf8_lossy(&default_out.stdout);
-    let file_text = String::from_utf8_lossy(&file_out.stdout);
-    assert!(!default_text.contains("file "));
-    assert!(file_text.contains("file "));
+    let function_text = String::from_utf8_lossy(&function_out.stdout);
+    assert!(default_text.contains("file "));
+    assert!(!function_text.contains("file "));
 }

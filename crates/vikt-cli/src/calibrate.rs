@@ -235,13 +235,14 @@ pub struct CalibrateArgs {
     #[arg(long, default_value = "python3")]
     pub python: String,
 
-    /// Measure the panel against each sampled line's own function
-    /// (`function`, the default) or against `vikt_core::filescope`'s
-    /// call-graph-weighted blend across its file (`file`). `--emit-dataset`
-    /// rows always carry both the file-scope score and its function
-    /// features regardless of this flag; only the reported correlations and
-    /// verdict change.
-    #[arg(long, value_enum, default_value_t = Scope::Function)]
+    /// Measure the panel against `vikt_core::filescope`'s
+    /// call-graph-weighted blend across each line's file (`file`, the
+    /// default — matching what a default `vikt` invocation scores) or
+    /// against each sampled line's own function alone (`function`).
+    /// `--emit-dataset` rows always carry both the file-scope score and its
+    /// function features regardless of this flag; only the reported
+    /// correlations and verdict change.
+    #[arg(long, value_enum, default_value_t = Scope::File)]
     scope: Scope,
 }
 
@@ -695,6 +696,11 @@ struct Filescope {
     /// Parallel to the `scored` slice `filescope_layer` was built from:
     /// each function's own four call-graph features.
     features: Vec<FunctionFeatures>,
+    /// Per file, each scored line's owning function as an index into that
+    /// same slice — `vikt_core::line_owners`'s attribution, which is what
+    /// `scores` blended, so dataset rows report the features of the
+    /// function that actually produced the line's file score.
+    owners: BTreeMap<PathBuf, BTreeMap<u32, usize>>,
 }
 
 /// Builds the file-scope layer, grouped by file so a line is never blended
@@ -722,6 +728,11 @@ fn filescope_layer(scored: &[ScoredFn]) -> Filescope {
         for (&i, feat) in idxs.iter().zip(vikt_core::function_features(&functions)) {
             layer.features[i] = feat;
         }
+        let owners = vikt_core::line_owners(&functions)
+            .into_iter()
+            .map(|(line, local)| (line, idxs[local]))
+            .collect();
+        layer.owners.insert(file.to_path_buf(), owners);
         layer
             .scores
             .insert(file.to_path_buf(), vikt_core::file_scores(&functions));
@@ -1160,7 +1171,13 @@ fn write_dataset(
             mutants: pl.total,
             killed: pl.kills,
             kill_rate: pl.kills as f64 / pl.total as f64,
-            function_features: filescope.features[pl.owner].into(),
+            function_features: filescope.features[filescope
+                .owners
+                .get(&pl.file)
+                .and_then(|m| m.get(&pl.line))
+                .copied()
+                .unwrap_or(pl.owner)]
+            .into(),
             file_score,
         };
         out.push_str(&serde_json::to_string(&row)?);

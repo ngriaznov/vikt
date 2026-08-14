@@ -70,6 +70,8 @@ fn calibrates_a_javascript_tree_and_leaves_it_untouched() {
             "--test-cmd",
             "node --test",
             "--gate",
+            "--scope",
+            "function",
         ])
         .output()
         .expect("running the vikt binary");

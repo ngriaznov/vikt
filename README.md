@@ -373,6 +373,19 @@ failures do not overlap. Use a single instrument to re-fit weights against
 new labels, to see which facet drove a surprising score, or to verify a
 refactor left a member byte-identical — never as the score a consumer reads.
 
+### File scope
+
+By default every line's score blends two layers: its standing inside its own
+function (the panel above) and its function's standing in the file — a
+weight from four rank-normalised call-graph signals (call-graph depth,
+fan-in, size share, boundary density), computed over the file's intra-file
+call graph with conservative name matching. The blend is re-ranked across
+the file and emitted as `file_score` on every sidecar span; `score`, `rank`
+and tiers are untouched, and files never compete with each other. `--scope
+function` drops the layer and restores the pre-file-scope artifact
+byte-for-byte. `vikt calibrate` measures whichever scope it is given
+(default `file`, against a file-wide positional null).
+
 ### SARIF output
 
 `--format sarif` emits SARIF 2.1.0 instead of the sidecar: one `note`-level
