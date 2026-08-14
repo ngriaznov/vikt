@@ -1,6 +1,6 @@
 //! An alternative scorer built on Schur-complement deletion sensitivity.
 //!
-//! [`crate::salience::score_of`] — the `current` scorer — blends dependence-
+//! [`crate::importance::score_of`] — the `current` scorer — blends dependence-
 //! cone size, control-dominance weight, loop depth and effect-ness by fixed
 //! weights. This module answers a narrower, more literal question instead:
 //! **if this statement were deleted, how much less influence would the
@@ -17,7 +17,7 @@
 //!
 //! `Ω`, the outputs, is every [`NodeKind::is_effect`] node whose call target
 //! does not match the [`Denylist`] — the same "what counts as an effect"
-//! question [`crate::salience::analyze`] answers when it decides `EffectSite`
+//! question [`crate::importance::analyze`] answers when it decides `EffectSite`
 //! vs `Denylisted`.
 //!
 //! Each row is normalised by that node's *total* raw out-weight — including
@@ -134,8 +134,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::graph::{Graph, strongly_connected};
+use crate::importance::Denylist;
 use crate::ir::{FunctionIr, NodeId, NodeKind};
-use crate::salience::Denylist;
 
 /// Weight contributed by a data (def-use) dependence edge.
 const DATA_WEIGHT: f64 = 1.0;
@@ -208,8 +208,8 @@ const PIVOT_EPS: f64 = 1e-12;
 /// influence `F`. `0.0` for every node that cannot reach an output at all.
 ///
 /// Tier assignment is untouched by this function — it is called only to
-/// overwrite [`crate::salience::NodeSalience::score`] after tiering has
-/// already run. See [`crate::salience::analyze_with_scorer`].
+/// overwrite [`crate::importance::NodeImportance::score`] after tiering has
+/// already run. See [`crate::importance::analyze_with_scorer`].
 #[must_use]
 pub fn score(ir: &FunctionIr, graph: &Graph, denylist: &Denylist) -> Vec<f64> {
     let n = graph.n;
@@ -266,7 +266,7 @@ pub fn score(ir: &FunctionIr, graph: &Graph, denylist: &Denylist) -> Vec<f64> {
 }
 
 /// `Ω`: effect nodes, minus calls the denylist matches. Identical criterion
-/// to [`crate::salience::analyze`]'s own "what is a real effect" question.
+/// to [`crate::importance::analyze`]'s own "what is a real effect" question.
 fn omega_set(ir: &FunctionIr, denylist: &Denylist) -> Vec<bool> {
     ir.nodes
         .iter()
@@ -913,7 +913,7 @@ mod tests {
     }
 
     /// Denylisted calls must never become `Ω`, mirroring
-    /// `crate::salience::analyze`'s own inert rule.
+    /// `crate::importance::analyze`'s own inert rule.
     #[test]
     fn denylisted_call_is_not_an_output() {
         let ir = FunctionIr {

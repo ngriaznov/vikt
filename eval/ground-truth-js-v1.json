@@ -1,5 +1,5 @@
 {
- "schema": "salience-ground-truth-js/v1",
+ "schema": "vikt-ground-truth-js/v1",
  "rater": "claude-opus-5",
  "method": "Blind expert labelling of JavaScript and TypeScript, mirroring the Python protocol: every function read from source and labelled per line BEFORE any scorer ran on it, file committed before measurement. This is a TRANSFER test: the panel weights were fitted on Python labels only and are applied here unchanged. lodash chunk and debounce were deliberately EXCLUDED as contaminated - their scores had already been rendered during frontend development.",
  "importance_scale": "10 = changing this line materially changes what the function does or returns; 5 = supporting work a reader must follow but that carries no decision; 0 = removable with no behavioural consequence.",

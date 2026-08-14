@@ -256,7 +256,7 @@ to be mostly measuring "later in the function".
 The finding that matters more than the ranking: the two targets correlate at
 0.09–0.15 with each other. "Which lines does a reader need to look at" and
 "which lines change what the program does" are close to independent questions.
-A single salience number cannot serve both, and the tool should stop pretending
+A single importance number cannot serve both, and the tool should stop pretending
 otherwise — `schur` for the first, `leverage` for the second, and say which one
 is being asked.
 

@@ -220,7 +220,7 @@ case above it is a generated data table) are skipped loudly, never silently.
 `eval/`): exception edges are OFF everywhere, because making handlers
 reachable destroys post-dominance and drags scores toward error paths
 (0.33 → 0.13 against expert labels when tried). The semantically faithful
-CFG is not the most useful one for salience. And the evaluation protocol behind every
+CFG is not the most useful one for importance. And the evaluation protocol behind every
 number: blind per-line labels committed before measurement
 (`eval/ground-truth-*.json`), leave-one-function-out held-out fits
 (`eval/judgement.py`), a rater-free mutation oracle (`eval/mutation_oracle.py`),
@@ -235,7 +235,7 @@ classification and a ranking:
 - **Agent reading guidance**: what to read first in an unfamiliar body.
 - **Agent edit policy** — a harness hook that demands verification when an edit
   touches a core span, and waves through a logging change.
-- **Weighted dependency graphs** — nodes weighted by the salience of what they
+- **Weighted dependency graphs** — nodes weighted by the importance of what they
   contain, rather than by line count.
 - **Performance work** — start profiling from the loops with real loop-carried
   dataflow, not from wherever the flame graph happens to be wide.
@@ -541,7 +541,7 @@ enters that loop.
   are handled separately; their interaction has no coverage.
 - **Property accessors pile onto the class declaration line.** Kotlin attributes
   every generated getter to the line the class is declared on, so a data class
-  with many properties concentrates their salience on one line.
+  with many properties concentrates their importance on one line.
 - **Only the `KotlinDebug` stratum is understood.** Other JSR-45 producers
   (JSP, Scala, Groovy) emit different strata; those fall back to the default
   stratum, and lines resolving to a foreign file are dropped and counted rather

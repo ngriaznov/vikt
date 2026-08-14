@@ -216,11 +216,11 @@ def lower_code(code, file):
     # slice toward error paths.
     #
     # The deeper point is worth stating plainly: the semantically faithful CFG
-    # is not the most useful one for salience. Exceptional control flow is
+    # is not the most useful one for importance. Exceptional control flow is
     # pervasive but peripheral — a reader labels `onerror(error); return` as
     # importance 5, not 10 — and modelling it faithfully lets a rare path
     # dominate the structure of a function whose ordinary path is what matters.
-    # Coverage tools include these edges because they must; a salience map is
+    # Coverage tools include these edges because they must; a importance map is
     # answering a different question and is better off without them.
     #
     # Kept behind a flag rather than deleted, because the right fix is probably

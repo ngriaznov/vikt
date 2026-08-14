@@ -3,7 +3,7 @@
 //!
 //! Everything here is textbook and deterministic. No heuristics, no thresholds,
 //! no inference — the only tunable in the whole crate lives in
-//! [`crate::salience`], and it is a scoring weight, not a classification rule.
+//! [`crate::importance`], and it is a scoring weight, not a classification rule.
 //!
 //! Iteration order is fixed everywhere it could be observed: sets are
 //! `BTreeSet`, maps are `BTreeMap`, and worklists drain in index order. Two runs

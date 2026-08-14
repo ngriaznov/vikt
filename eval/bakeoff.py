@@ -101,7 +101,7 @@ def load_truth(path, no_delete=False):
     would say something about the corpus rather than the line.
     """
     doc = json.loads(Path(path).read_text())
-    if doc.get("schema", "").startswith("salience-mutation-oracle"):
+    if doc.get("schema", "").startswith("vikt-mutation-oracle"):
         key = "leverage_no_delete" if no_delete else "leverage"
         fns = []
         for f in doc["functions"]:

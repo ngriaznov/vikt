@@ -1,7 +1,7 @@
 //! An alternative scorer built on trophic levels, borrowed from food-web
 //! ecology.
 //!
-//! [`crate::salience::score_of`] — the `current` scorer — blends dependence-
+//! [`crate::importance::score_of`] — the `current` scorer — blends dependence-
 //! cone size, control-dominance weight, loop depth and effect-ness by fixed
 //! weights. [`crate::schur`] asks a deletion-sensitivity question. This
 //! module asks a third, narrower question: **how many layers of
@@ -178,8 +178,8 @@ const PIVOT_EPS: f64 = 1e-12;
 /// node.
 ///
 /// Tier assignment is untouched by this function — it is called only to
-/// overwrite [`crate::salience::NodeSalience::score`] after tiering has
-/// already run. See [`crate::salience::analyze_with_scorer`].
+/// overwrite [`crate::importance::NodeImportance::score`] after tiering has
+/// already run. See [`crate::importance::analyze_with_scorer`].
 #[must_use]
 pub fn score(graph: &Graph) -> Vec<f64> {
     let n = graph.n;

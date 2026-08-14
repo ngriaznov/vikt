@@ -16,8 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::importance::{FunctionImportance, LineSpan, Tier, project_to_lines};
 use crate::ir::FunctionIr;
-use crate::salience::{FunctionSalience, LineSpan, Tier, project_to_lines};
 
 /// Schema identifier, bumped on any breaking change to the shape below.
 pub const SCHEMA: &str = "vikt-sidecar/v1";
@@ -31,7 +31,7 @@ pub struct SpanRecord {
     pub end: u32,
     /// `core` / `boundary` / `plumbing` / `inert`.
     pub tier: String,
-    /// Continuous salience against a fixed scale, `0.0..=1.0`. Use for
+    /// Continuous importance against a fixed scale, `0.0..=1.0`. Use for
     /// thresholds and policy.
     pub score: f64,
     /// Percentile of that score within this function, `0.0..=1.0`. Use for
@@ -84,7 +84,7 @@ pub struct TierCounts {
     pub inert: usize,
 }
 
-/// The salience map for one function.
+/// The importance map for one function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionRecord {
     /// Source file this function's lines refer to. Omitted when it matches
@@ -136,7 +136,7 @@ impl Sidecar {
     }
 
     /// Appends the analysis of one function.
-    pub fn push(&mut self, ir: &FunctionIr, sal: &FunctionSalience) {
+    pub fn push(&mut self, ir: &FunctionIr, sal: &FunctionImportance) {
         let spans = project_to_lines(ir, sal);
         let mut summary = TierCounts::default();
         for s in &spans {

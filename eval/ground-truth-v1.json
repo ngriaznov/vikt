@@ -1,5 +1,5 @@
 {
-  "schema": "salience-ground-truth/v1",
+  "schema": "vikt-ground-truth/v1",
   "rater": "claude-opus-5",
   "method": "Blind expert labelling. Each function was read from source and every executable line assigned an importance in 0..10 and a tier, BEFORE running any scorer against it. None of these three functions had been inspected with the tool beforehand. Recorded to disk prior to measurement so the labels cannot drift toward whatever the tool happens to say.",
   "importance_scale": "10 = changing this line materially changes what the function does or returns; 5 = supporting work that a reader must follow but that carries no decision; 0 = removable with no behavioural consequence (logging, debug, pure micro-optimisation).",

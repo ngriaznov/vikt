@@ -1,4 +1,4 @@
-//! The statistic and the decision rule behind `salience calibrate`.
+//! The statistic and the decision rule behind `vikt calibrate`.
 //!
 //! Calibration asks one question of a repository: does the panel's ordering of
 //! lines agree with the lines' *measured* behavioural impact, where impact is

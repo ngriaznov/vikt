@@ -202,8 +202,8 @@ pub(crate) fn birnbaum_scores(ir: &FunctionIr, graph: &Graph) -> Vec<f64> {
 /// Spearman correlation against expert labels of exactly `0.0` — not because
 /// the ranking was wrong, but because it was invisible to the serialization.
 ///
-/// The fix follows the same design principle `salience::score_of` already
-/// uses for `Current` ("normalise against this body's own peak... salience
+/// The fix follows the same design principle `importance::score_of` already
+/// uses for `Current` ("normalise against this body's own peak... importance
 /// is a claim about relative standing inside a body"): take `ln(B_v)` and
 /// rescale it linearly against *this function's* own `[min, max]` of
 /// positive values. The geometric decay that caused the problem is exactly

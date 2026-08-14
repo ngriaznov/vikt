@@ -35,7 +35,7 @@
 //! *E
 //! ```
 //!
-//! Collapsing onto the call site is the right answer for a salience map, not
+//! Collapsing onto the call site is the right answer for a importance map, not
 //! merely the convenient one: the developer sees `timed("sum") { ... }` on line
 //! 56, and the work done by the inlined body really is work that line causes.
 

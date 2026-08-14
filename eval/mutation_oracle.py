@@ -838,7 +838,7 @@ def main():
         results.append(res)
 
     doc = {
-        "schema": "salience-mutation-oracle/v1",
+        "schema": "vikt-mutation-oracle/v1",
         "seed": RNG_SEED,
         "python": sys.version.split()[0],
         "functions": results,

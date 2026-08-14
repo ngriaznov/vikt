@@ -4,7 +4,7 @@
 #
 #   ./eval/fetch-corpus.sh && ./eval/run-corpus.sh [corpus-dir]
 #
-# SALIENCE_SCORER=current re-measures the incumbent alone for comparison.
+# VIKT_SCORER=current re-measures the incumbent alone for comparison.
 set -euo pipefail
 dir="${1:-corpus}"
 logs=eval/corpus-logs

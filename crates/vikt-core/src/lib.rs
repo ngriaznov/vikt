@@ -1,4 +1,4 @@
-//! Deterministic, inference-free per-line salience over function bodies.
+//! Deterministic, inference-free per-line importance over function bodies.
 //!
 //! Given a function lowered into [`ir::FunctionIr`], this crate classifies every
 //! statement into one of four tiers and projects the result onto source lines:
@@ -82,11 +82,11 @@
 pub mod artifact;
 pub mod calibration;
 pub mod graph;
+pub mod importance;
 pub mod ir;
 pub mod mutant;
 pub mod panel;
 pub mod pivot;
-pub mod salience;
 pub mod sarif;
 pub mod schur;
 pub mod strahler;
@@ -95,11 +95,11 @@ pub mod trophic;
 pub use artifact::{Sidecar, SpanRecord};
 pub use calibration::{Verdict, spearman, verdict};
 pub use graph::Graph;
+pub use importance::{
+    Denylist, FunctionImportance, LineSpan, NodeImportance, Reason, ScoreWeights, Scorer, Tier,
+    analyze, analyze_with_scorer, project_to_lines,
+};
 pub use ir::{FunctionId, FunctionIr, IrError, Node, NodeKind};
 pub use mutant::{Mutant, MutantSet};
 pub use panel::PanelProfile;
-pub use salience::{
-    Denylist, FunctionSalience, LineSpan, NodeSalience, Reason, ScoreWeights, Scorer, Tier,
-    analyze, analyze_with_scorer, project_to_lines,
-};
 pub use sarif::SarifLog;

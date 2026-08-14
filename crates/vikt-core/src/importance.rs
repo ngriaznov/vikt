@@ -19,7 +19,7 @@ use crate::ir::{FunctionIr, NodeId, NodeKind};
 
 /// How much behavior a statement carries.
 ///
-/// Ordered by salience so that projecting several instructions onto one source
+/// Ordered by importance so that projecting several instructions onto one source
 /// line is a `max`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
@@ -329,12 +329,12 @@ pub const CORE_INFLUENCE: f64 = 0.10;
 
 /// Per-node analysis result.
 #[derive(Debug, Clone)]
-pub struct NodeSalience {
+pub struct NodeImportance {
     /// The node this describes.
     pub node: NodeId,
     /// Assigned tier.
     pub tier: Tier,
-    /// Continuous salience, `0.0..=1.0`.
+    /// Continuous importance, `0.0..=1.0`.
     pub score: f64,
     /// Every reason that applied, ordered by descending tier.
     pub reasons: Vec<Reason>,
@@ -342,9 +342,9 @@ pub struct NodeSalience {
 
 /// The analysis of one function, before line projection.
 #[derive(Debug, Clone)]
-pub struct FunctionSalience {
+pub struct FunctionImportance {
     /// Per-node results, indexed by [`NodeId`].
-    pub nodes: Vec<NodeSalience>,
+    pub nodes: Vec<NodeImportance>,
     /// The derived graph, retained so callers can inspect loops and dominance
     /// without recomputing.
     pub graph: Graph,
@@ -359,7 +359,7 @@ pub struct FunctionSalience {
 /// message instead of letting them surface as silently wrong tiers.
 #[must_use]
 #[allow(clippy::too_many_lines)]
-pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> FunctionSalience {
+pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> FunctionImportance {
     let graph = Graph::build(ir);
     let n = ir.nodes.len();
 
@@ -566,7 +566,7 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
             .max()
             .unwrap_or(Tier::Plumbing);
         let score = score_of(tier, node, kind, &graph, dist[node], peaks, weights);
-        nodes.push(NodeSalience {
+        nodes.push(NodeImportance {
             node,
             tier,
             score,
@@ -574,7 +574,7 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
         });
     }
 
-    FunctionSalience { nodes, graph }
+    FunctionImportance { nodes, graph }
 }
 
 /// Composes the continuous score from the same facts that drove the tier.
@@ -599,7 +599,7 @@ fn score_of(
     // rather than against its instruction count. Dividing by size makes every
     // statement in a large body score near zero (measured, half of all lines
     // landed within 0.01 of each other), which is the opposite of what a
-    // heatmap needs. Salience is a claim about relative standing inside a body,
+    // heatmap needs. Importance is a claim about relative standing inside a body,
     // so the scale should be the body's own.
     let (peak_influence, peak_depends) = peaks;
     let influence = if peak_influence == 0 {
@@ -774,11 +774,11 @@ pub struct LineSpan {
 /// one deliberate asymmetry: `inert` is the *weakest* tier here, even though a
 /// denylist match is the *strongest* signal at the node level. A line holding
 /// both a log call and real work is not inert. The log call merely happens to
-/// share it. Ordering [`Tier`] by salience makes that fall out of `max`.
+/// share it. Ordering [`Tier`] by importance makes that fall out of `max`.
 #[must_use]
-pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan> {
+pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionImportance) -> Vec<LineSpan> {
     // Reasons are carried with the tier they imply so the aggregate can be
-    // ordered by salience. A line holding both a core statement and a plumbing
+    // ordered by importance. A line holding both a core statement and a plumbing
     // one must lead with the core reason: a consumer reading only the first
     // entry (a hook message, a gutter tooltip) would otherwise be told the
     // line is inconsequential precisely when it is not.
@@ -866,7 +866,7 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
 /// Which algorithm produces the continuous per-node `score`.
 ///
 /// Tier assignment is never affected: tiers are computed once, by [`analyze`],
-/// before the scorer is consulted. Only [`NodeSalience::score`] differs.
+/// before the scorer is consulted. Only [`NodeImportance::score`] differs.
 ///
 /// [`Scorer::Panel`] is the shipped strategy — see [`crate::panel`] for why a
 /// combination, the provenance of its weights, and the held-out evidence. The
@@ -911,7 +911,7 @@ pub fn analyze_with_scorer(
     denylist: &Denylist,
     weights: &ScoreWeights,
     scorer: Scorer,
-) -> FunctionSalience {
+) -> FunctionImportance {
     let mut sal = analyze(ir, denylist, weights);
     let replacement = match scorer {
         Scorer::Current => None,

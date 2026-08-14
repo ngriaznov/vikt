@@ -14,7 +14,7 @@
 //!   with expert labels everywhere they were tried; MIR's unwind targets are
 //!   the same structure by another name.
 //! - StorageLive/StorageDead/Retag/Nop and friends are not emitted: they are
-//!   bookkeeping with no salience signal.
+//!   bookkeeping with no importance signal.
 //! - An assignment through a Deref projection, or into a static, is a
 //!   StateWrite: the value escapes the frame.
 //! - Calls carry their callee path so the denylist can recognise logging
@@ -120,7 +120,7 @@ fn rvalue_uses(rv: &Rvalue, out: &mut Vec<u32>) {
             }
         }
         ThreadLocalRef(_) => {}
-        // Future variants: contributing no uses is conservative for salience
+        // Future variants: contributing no uses is conservative for importance
         // (the node still exists; it just pulls in less).
         _ => {}
     }

@@ -43,7 +43,7 @@ pub enum CallOpacity {
     Inert,
 }
 
-/// What a node does, as far as salience is concerned.
+/// What a node does, as far as importance is concerned.
 ///
 /// This is not a disassembly. It is the minimum classification the tiering
 /// rules dispatch on, and every substrate can produce it.
@@ -138,7 +138,7 @@ pub struct Node {
 }
 
 impl Node {
-    /// Whether this node carries no salience signal of its own.
+    /// Whether this node carries no importance signal of its own.
     ///
     /// An unconditional jump, a `nop`, or a stack-housekeeping instruction has
     /// no definitions, reads nothing, and is not an effect. It is real in the

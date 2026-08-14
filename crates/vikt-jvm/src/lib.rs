@@ -323,7 +323,7 @@ fn classify(insn: &MokaInstruction) -> (NodeKind, Vec<VarId>) {
     let none = Vec::new();
     match insn {
         // A subroutine return is control flow left over from pre-Java-6 `jsr`
-        // and carries no salience of its own, same as a `nop`.
+        // and carries no importance of its own, same as a `nop`.
         MokaInstruction::Nop | MokaInstruction::SubroutineRet(_) => (NodeKind::Pure, none),
         MokaInstruction::Return(_) => (NodeKind::Return, none),
         MokaInstruction::Jump { condition, .. } => {

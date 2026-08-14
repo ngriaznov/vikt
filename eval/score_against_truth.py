@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Score a salience binary against the blind expert labels in ground-truth-v1.json.
+"""Score a vikt binary against the blind expert labels in ground-truth-v1.json.
 
-    ./eval/score_against_truth.py <path-to-salience-binary> [--scorer NAME]
+    ./eval/score_against_truth.py <path-to-vikt-binary> [--scorer NAME]
 
 Reports Spearman rank correlation per function and averaged, plus the lines each
 scorer disagrees with most, which is where the interesting information is, not

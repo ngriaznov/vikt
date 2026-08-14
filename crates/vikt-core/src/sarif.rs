@@ -2,7 +2,7 @@
 //!
 //! Code-scanning consumers (GitHub code scanning, SARIF viewers, IDE
 //! extensions) ingest SARIF and nothing else, so this is the bridge that lets
-//! them display salience without learning the sidecar schema. Three
+//! them display importance without learning the sidecar schema. Three
 //! commitments shape the projection:
 //!
 //! - **It consumes [`Sidecar`], never a frontend's IR.** Anything that can
@@ -22,7 +22,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::artifact::Sidecar;
-use crate::salience::Tier;
+use crate::importance::Tier;
 
 /// The `$schema` URI SARIF 2.1.0 logs identify themselves with.
 pub const SARIF_SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
@@ -145,7 +145,7 @@ pub struct Region {
 /// so a SARIF-only consumer can threshold on score without a second parse.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResultProperties {
-    /// Continuous salience, `0.0..=1.0`, two decimals as in the sidecar.
+    /// Continuous importance, `0.0..=1.0`, two decimals as in the sidecar.
     pub score: f64,
     /// Tier name, duplicated from the rule id for filter expressions that
     /// only see the bag.
@@ -163,7 +163,7 @@ impl SarifLog {
     /// that do not sit under the root pass through unchanged.
     #[must_use]
     pub fn from_sidecar(sidecar: &Sidecar, tiers: &[Tier], root: Option<&Path>) -> Self {
-        // Fixed descending-salience order: dedups the request and keeps rule
+        // Fixed descending-importance order: dedups the request and keeps rule
         // order independent of the order the caller listed tiers in.
         let reported: Vec<Tier> = [Tier::Core, Tier::Boundary, Tier::Plumbing, Tier::Inert]
             .into_iter()

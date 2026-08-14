@@ -1,6 +1,6 @@
 //! An alternative scorer built on Horton–Strahler stream order.
 //!
-//! [`crate::salience::score_of`] — the `current` scorer — blends dependence-
+//! [`crate::importance::score_of`] — the `current` scorer — blends dependence-
 //! cone size, control-dominance weight, loop depth and effect-ness by fixed
 //! weights. This module answers a narrower, structural question instead:
 //! **where does this function's dataflow converge?** — borrowing, literally,

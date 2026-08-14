@@ -1,4 +1,4 @@
-//! `vikt` — produce a per-line salience sidecar for a compiled class or a
+//! `vikt` — produce a per-line importance sidecar for a compiled class or a
 //! Python source file.
 //!
 //! ```text
@@ -56,7 +56,7 @@ enum SarifTier {
 #[derive(Debug, Parser)]
 #[command(
     name = "vikt",
-    about = "Deterministic per-line salience tiering over function bodies",
+    about = "Deterministic per-line importance tiering over function bodies",
     long_about = "Classifies every statement in every function body as core, boundary, \
 plumbing or inert, and projects the result onto source lines.\n\n\
 Accepts a JVM .class file or a Python source file. No model runs: every tier is \

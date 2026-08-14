@@ -57,8 +57,8 @@
 use std::collections::BTreeMap;
 
 use crate::graph::Graph;
+use crate::importance::{Denylist, FunctionImportance, Tier};
 use crate::ir::FunctionIr;
-use crate::salience::{Denylist, FunctionSalience, Tier};
 
 /// Fitted weight of each panel member, in the order
 /// `[current, schur, pivot, trophic, strahler, position, boundary]`.
@@ -197,7 +197,7 @@ fn to_lines(per_node: &[f64], lines: &BTreeMap<u32, Vec<usize>>) -> Vec<f64> {
 #[must_use]
 pub fn line_features(
     ir: &FunctionIr,
-    sal: &FunctionSalience,
+    sal: &FunctionImportance,
     denylist: &Denylist,
 ) -> BTreeMap<u32, [f64; 7]> {
     let graph: &Graph = &sal.graph;
@@ -275,14 +275,14 @@ pub fn line_features(
 /// Computes the panel score for every node of `ir`, using `profile`'s
 /// fitted weight vector.
 ///
-/// `sal` must be the result of [`crate::salience::analyze`] on the same `ir`:
+/// `sal` must be the result of [`crate::importance::analyze`] on the same `ir`:
 /// its per-node scores are the `current` member, its tiers drive the boundary
 /// feature and the inert floor. Structural nodes and nodes without a line
 /// score `0.0` — they are invisible to the artifact projection anyway.
 #[must_use]
 pub fn score(
     ir: &FunctionIr,
-    sal: &FunctionSalience,
+    sal: &FunctionImportance,
     denylist: &Denylist,
     profile: PanelProfile,
 ) -> Vec<f64> {
@@ -318,8 +318,8 @@ pub fn score(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::importance::{ScoreWeights, analyze};
     use crate::ir::{FunctionId, Node, NodeKind};
-    use crate::salience::{ScoreWeights, analyze};
 
     fn fixture() -> FunctionIr {
         // line 1: x = param        (defs 0)

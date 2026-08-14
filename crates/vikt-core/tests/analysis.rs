@@ -18,7 +18,7 @@ fn func(name: &str, nodes: Vec<Node>) -> FunctionIr {
     }
 }
 
-fn run(ir: &FunctionIr) -> vikt_core::FunctionSalience {
+fn run(ir: &FunctionIr) -> vikt_core::FunctionImportance {
     ir.validate().expect("test IR must be well-formed");
     analyze(ir, &Denylist::new(), &ScoreWeights::default())
 }

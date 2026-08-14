@@ -1,5 +1,5 @@
 {
- "schema": "salience-ground-truth/v2",
+ "schema": "vikt-ground-truth/v2",
  "rater": "claude-opus-5",
  "method": "Blind expert labelling, extending v1 from 3 functions to 10. Every function added here was read from source and labelled BEFORE any scorer was run against it, and the file was written to disk before measurement. v1's three functions are carried over unchanged so the two versions are comparable. Functions were chosen to widen the shape of the corpus, not to favour any scorer: v1 was three behaviour-dense functions with almost no plumbing, which gave the tier partition nothing to separate. v2 deliberately includes a thin wrapper (shlex.split), a validation-dominated parse (ipaddress._ip_int_from_string), a flat if-chain with no loop (urllib.parse.urlsplit), a function containing a near-duplicate of itself (bisect.bisect_right), and three functions containing genuine plumbing lines - bound-method bindings and invariant assertions - which are the sharpest test in the corpus.",
  "importance_scale": "10 = changing this line materially changes what the function does or returns; 5 = supporting work that a reader must follow but that carries no decision; 0 = removable with no behavioural consequence (logging, debug, pure micro-optimisation).",
