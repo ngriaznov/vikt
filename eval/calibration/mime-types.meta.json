@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/jshttp/mime-types.git",
+  "commit": "3a1187ee21388efe46b916d4991589d595bcb26c",
+  "language": "javascript",
+  "test_cmd": "npm test",
+  "mutants_executed": 73,
+  "invalid": 0,
+  "panel_rho": 0.080,
+  "null_rho": -0.003,
+  "verdict": "marginal"
+}
