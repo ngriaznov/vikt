@@ -7,6 +7,7 @@
 //! salience Foo.class --stats         # tier histogram and timing
 //! salience foo.py --format sarif     # SARIF 2.1.0 for code-scanning uploads
 //! salience calibrate src/ --test-cmd "python3 -m unittest"  # self-calibration
+//! salience calibrate src/ --test-cmd "node --test"          # ...or JS/TS
 //! ```
 
 #![forbid(unsafe_code)]
@@ -138,7 +139,10 @@ struct Args {
 enum Cmd {
     /// Self-calibrate on a repository: mutate lines the panel scored, let the
     /// repository's own test suite kill mutants, and report whether the panel
-    /// ordering agrees with the kill rates. Python sources only for now.
+    /// ordering agrees with the kill rates. Python and JavaScript/TypeScript
+    /// sources; a tree with both is calibrated in whichever scored more
+    /// lines. TypeScript caveat: a type-invalid mutant is read as killed by
+    /// the repository's own toolchain, not distinguished from a test catch.
     Calibrate(calibrate::CalibrateArgs),
 }
 

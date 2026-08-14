@@ -83,6 +83,7 @@ pub mod artifact;
 pub mod calibration;
 pub mod graph;
 pub mod ir;
+pub mod mutant;
 pub mod panel;
 pub mod pivot;
 pub mod salience;
@@ -95,6 +96,7 @@ pub use artifact::{Sidecar, SpanRecord};
 pub use calibration::{Verdict, spearman, verdict};
 pub use graph::Graph;
 pub use ir::{FunctionId, FunctionIr, IrError, Node, NodeKind};
+pub use mutant::{Mutant, MutantSet};
 pub use panel::PanelProfile;
 pub use salience::{
     Denylist, FunctionSalience, LineSpan, NodeSalience, Reason, ScoreWeights, Scorer, Tier,

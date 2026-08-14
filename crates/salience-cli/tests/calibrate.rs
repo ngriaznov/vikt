@@ -240,14 +240,18 @@ fn copy_keeps_dot_files_and_follows_symlinks() {
     );
 }
 
-/// A tree with sources for another frontend gets the honest scope error, not
-/// a generic "nothing found". No interpreter involved: the check runs before
-/// any Python is spawned.
+/// A tree with sources for a frontend calibrate does not support at all gets
+/// the honest scope error, not a generic "nothing found". No interpreter or
+/// oxc parse involved: the check runs on file extensions alone, before
+/// either engine touches the tree. `.js` is deliberately not used here any
+/// more — calibrate now supports it (see `calibrates_a_javascript_tree` in
+/// `calibrate_js.rs`) — so this uses a Rust source, a frontend calibrate has
+/// never covered.
 #[test]
-fn non_python_trees_are_rejected() {
+fn unsupported_frontend_trees_are_rejected() {
     let dir = std::env::temp_dir().join(format!("salience-calibrate-scope-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir is writable");
-    std::fs::write(dir.join("app.js"), "export const answer = 42;\n").expect("temp file");
+    std::fs::write(dir.join("app.rs"), "fn main() {}\n").expect("temp file");
     let out = Command::new(env!("CARGO_BIN_EXE_salience"))
         .args(["calibrate"])
         .arg(&dir)
@@ -257,5 +261,8 @@ fn non_python_trees_are_rejected() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("Python sources only"), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("Python and JavaScript/TypeScript sources only"),
+        "stderr:\n{stderr}"
+    );
 }

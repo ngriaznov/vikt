@@ -13,11 +13,18 @@
 //! cannot beat "earlier is more important" on this repository has nothing to
 //! offer it.
 //!
-//! Python only for now: mutation needs an AST round-trip and a test-command
-//! convention, and the Python frontend is the one that ships both.
+//! Python and JavaScript/TypeScript today: mutation needs a language-specific
+//! rewrite engine and a test-command convention, and those are the two
+//! frontends that ship both — see [`Language`] for how a tree picks one.
+//! TypeScript carries one extra caveat: a mutant that is syntactically valid
+//! JavaScript but violates TypeScript's type system is read as *killed* by
+//! whatever runs the repository's own type check, indistinguishable from a
+//! mutant a test actually caught. `run` prints a one-line notice when any
+//! scored file is `.ts`/`.mts`/`.cts`/`.tsx`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -26,10 +33,10 @@ use std::time::{Duration, Instant};
 use salience_core::calibration::{
     MIN_EXECUTED_MUTANTS, MIN_SCORED_LINES, NULL_MARGIN, RHO_FLOOR, Verdict, spearman, verdict,
 };
+use salience_core::mutant::MutantSet;
 use salience_core::{
     Denylist, PanelProfile, ScoreWeights, Scorer, analyze_with_scorer, project_to_lines,
 };
-use salience_py::calibrate::Mutant;
 
 /// Body-size ceiling, matching the analyze path's `--max-instructions`
 /// default: anything larger has only ever been generated data tables, where
@@ -43,23 +50,95 @@ const MAX_COPY_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Directory names never copied, beyond everything dot-prefixed: build
 /// output and vendored trees, where mutants would measure someone else's
-/// code against this repository's tests.
-const SKIP_DIRS: &[&str] = &["__pycache__", "node_modules", "target", "venv"];
+/// code against this repository's tests. `node_modules` is handled
+/// separately (see [`TreeScan::node_modules`]): it must exist in the copy
+/// for a JavaScript suite to run, but never as scored or mutated source.
+const SKIP_DIRS: &[&str] = &["__pycache__", "target", "venv"];
 
-/// Extensions that mark a tree as belonging to another frontend, for the
-/// "Python only" error to fire instead of a puzzling "no sources found".
-const OTHER_FRONTENDS: &[&str] = &[
-    "class", "java", "kt", "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "rs",
-];
+/// Extensions Python sources carry.
+const PY_EXT: &[&str] = &["py"];
+
+/// Extensions JavaScript/TypeScript sources carry.
+const JS_EXT: &[&str] = &["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"];
+
+/// The JS_EXT subset that is TypeScript rather than plain JavaScript — the
+/// subset the type-check caveat in the module docs applies to.
+const TS_EXT: &[&str] = &["ts", "mts", "cts", "tsx"];
+
+/// Extensions that mark a tree as belonging to a frontend calibrate does not
+/// support at all, for an honest "not supported" error instead of a puzzling
+/// "no sources found".
+const OTHER_FRONTENDS: &[&str] = &["class", "java", "kt", "rs"];
+
+/// Which lowering-and-mutation engine handles a tree, chosen once in `run`
+/// from what [`scan_tree`] found and threaded through every stage that needs
+/// to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Language {
+    Python,
+    JavaScript,
+}
+
+impl Language {
+    /// How the language reads in a sentence, for progress and error text.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Python => "Python",
+            Self::JavaScript => "JavaScript/TypeScript",
+        }
+    }
+
+    /// Which panel weight vector fits the frontend's dependence-graph
+    /// granularity — instruction-level for bytecode, statement-level for
+    /// the oxc-lowered AST. Mirrors `profile_for_ext` in `main.rs`.
+    fn panel_profile(self) -> PanelProfile {
+        match self {
+            Self::Python => PanelProfile::Instruction,
+            Self::JavaScript => PanelProfile::Statement,
+        }
+    }
+
+    /// The synthetic function name(s) that overlap the extent of a real
+    /// `def`/function and would double-count lines if sampled. Python's
+    /// bytecode compiler synthesizes a code object — named `<module>`,
+    /// `<lambda>`, `<listcomp>` and friends — for constructs that are not
+    /// their own top-level definition; excluding anything with `<` in its
+    /// name catches all of them at once. JavaScript has only one such
+    /// wrapper: the synthetic top-level function this frontend builds to
+    /// hold module-level statements (named exactly `<module>`, see
+    /// `salience_js::lower_source`). Every other JS function — named or
+    /// anonymous — is a real function whose lines are its own, most often
+    /// an arrow function assigned to a name; excluding it the way Python
+    /// excludes lambdas would silently drop most JS code from calibration.
+    fn is_synthetic(self, name: &str) -> bool {
+        match self {
+            Self::Python => name.contains('<'),
+            Self::JavaScript => name == "<module>",
+        }
+    }
+}
 
 #[derive(Debug, clap::Args)]
 pub struct CalibrateArgs {
-    /// Directory of Python sources. Calibration currently supports Python
-    /// sources only; other frontends are rejected with an error.
+    /// Directory of Python and/or JavaScript/TypeScript sources. A tree with
+    /// files for another frontend entirely is rejected with an error. A tree
+    /// with both Python and JavaScript/TypeScript sources is calibrated in
+    /// whichever language scored more lines; the run says which, and why.
+    ///
+    /// TypeScript caveat: a mutant that is syntactically valid JavaScript
+    /// but fails TypeScript's type check is read as *killed* by whatever
+    /// runs the repository's own type-checking step — indistinguishable
+    /// from a mutant an actual test caught. `--test-cmd` for a TypeScript
+    /// tree should therefore isolate test failures from build/type-check
+    /// failures if the two matter to distinguish; calibrate itself only
+    /// ever sees the command's exit code.
     pub path: PathBuf,
 
     /// Command that runs the project's tests, executed with `sh -c` from the
-    /// root of a temporary copy of the tree. Must pass on the unmutated tree.
+    /// root of a temporary copy of the tree. Must pass on the unmutated
+    /// tree. For Python, typically a `python3 -m unittest`/`pytest`
+    /// invocation; for JavaScript/TypeScript, typically `node --test` or
+    /// `npm test`.
     #[arg(long, value_name = "COMMAND")]
     pub test_cmd: String,
 
@@ -84,8 +163,11 @@ pub struct CalibrateArgs {
     #[arg(long)]
     pub gate: bool,
 
-    /// Interpreter used to lower sources, generate mutants — and, typically,
-    /// referenced by the test command itself.
+    /// Interpreter used to lower Python sources and generate Python mutants
+    /// — and, typically, referenced by the test command itself. Unused when
+    /// the tree calibrates as JavaScript/TypeScript: that engine runs
+    /// in-process against the workspace's own oxc parser, no interpreter
+    /// involved.
     #[arg(long, default_value = "python3")]
     pub python: String,
 }
@@ -107,7 +189,7 @@ struct ScoredFn {
 type FileScores = BTreeMap<PathBuf, BTreeMap<u32, f64>>;
 
 /// A mutant tied to the (relative) file it rewrites.
-type FileMutant = (PathBuf, Mutant);
+type FileMutant = (PathBuf, salience_core::mutant::Mutant);
 
 /// One test-suite run over a mutant.
 #[derive(Clone, Copy)]
@@ -117,38 +199,55 @@ enum TestOutcome {
     Timeout,
 }
 
+#[allow(clippy::too_many_lines)] // one stage per pipeline step; splitting hides the shape
 pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
     if !args.path.is_dir() {
         return Err(format!(
-            "calibrate takes a directory of Python sources, and {} is not a directory",
+            "calibrate takes a directory of sources, and {} is not a directory",
             args.path.display()
         )
         .into());
     }
 
     let scan = scan_tree(&args.path)?;
-    if scan.py.is_empty() {
+    if scan.py.is_empty() && scan.js.is_empty() {
         return Err(if scan.other_frontend {
             format!(
-                "calibration currently supports Python sources only, and {} contains none",
+                "calibration supports Python and JavaScript/TypeScript sources only, and {} contains neither",
                 args.path.display()
             )
         } else {
-            format!("no Python sources found under {}", args.path.display())
+            format!(
+                "no Python or JavaScript/TypeScript sources found under {}",
+                args.path.display()
+            )
         }
         .into());
     }
 
     // Everything from here on happens in the copy. The input tree is never
     // opened for writing; the integration tests hold this to byte-identity.
-    let copy = TempTree::create(&args.path, &scan.files)?;
+    let copy = TempTree::create(&args.path, &scan.files, &scan.node_modules)?;
     println!(
-        "calibrate: copied {} files to a temporary tree{}",
+        "calibrate: copied {} files to a temporary tree{}{}",
         scan.files.len(),
         if scan.skipped_large > 0 {
             format!(" ({} files over 8 MiB skipped)", scan.skipped_large)
         } else {
             String::new()
+        },
+        if scan.node_modules.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", {} node_modules director{} linked in unscored",
+                scan.node_modules.len(),
+                if scan.node_modules.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                }
+            )
         }
     );
 
@@ -171,7 +270,43 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     }
 
-    let (mut scored, file_scores) = score_tree(&copy.root, &scan.py, &args.python);
+    let py = (!scan.py.is_empty())
+        .then(|| score_tree(&copy.root, &scan.py, Language::Python, &args.python));
+    let js = (!scan.js.is_empty())
+        .then(|| score_tree(&copy.root, &scan.js, Language::JavaScript, &args.python));
+    let (lang, mut scored, file_scores) = match (py, js) {
+        (Some(p), None) => (Language::Python, p.0, p.1),
+        (None, Some(j)) => (Language::JavaScript, j.0, j.1),
+        (Some(p), Some(j)) => {
+            let py_lines: usize = p.1.values().map(BTreeMap::len).sum();
+            let js_lines: usize = j.1.values().map(BTreeMap::len).sum();
+            let (winner, other, w_lines, o_lines) = if py_lines >= js_lines {
+                (Language::Python, Language::JavaScript, py_lines, js_lines)
+            } else {
+                (Language::JavaScript, Language::Python, js_lines, py_lines)
+            };
+            println!(
+                "calibrate: both Python and JavaScript/TypeScript sources found ({py_lines} Python scored lines, {js_lines} JavaScript/TypeScript); calibrating {} only ({w_lines} scored lines beats {other}'s {o_lines}) — narrow --path to target {other} instead",
+                winner.label(),
+                other = other.label(),
+            );
+            if winner == Language::Python {
+                (Language::Python, p.0, p.1)
+            } else {
+                (Language::JavaScript, j.0, j.1)
+            }
+        }
+        (None, None) => {
+            unreachable!("checked above: at least one of scan.py, scan.js is non-empty")
+        }
+    };
+
+    if lang == Language::JavaScript && scan.js.iter().any(|p| is_typescript(p)) {
+        println!(
+            "calibrate: TypeScript sources among the scored files — a mutant that fails the \
+repository's own type check is read as killed, indistinguishable from one an actual test caught"
+        );
+    }
 
     // Largest first: big bodies carry the most rankable lines per test run.
     // The full key is deterministic, so two runs sample the same functions.
@@ -188,8 +323,15 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         sampled.len()
     );
 
-    let (mutants, candidates) = generate_mutants(&copy.root, sampled, args)?;
-    if candidates > mutants.len() {
+    let (mutants, candidates, invalid_discarded) =
+        generate_mutants(&copy.root, sampled, lang, args)?;
+    if invalid_discarded > 0 {
+        println!(
+            "calibrate: {invalid_discarded} invalid mutants discarded (failed to re-parse after mutation)"
+        );
+    }
+    let attempted = mutants.len() + invalid_discarded;
+    if candidates > attempted {
         println!(
             "calibrate: budget of {} mutants reached: {} of {candidates} candidate sites will run; raise --budget for full coverage",
             args.budget,
@@ -220,6 +362,14 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
     })
 }
 
+/// True for `.ts`/`.mts`/`.cts`/`.tsx` — the extensions the type-check
+/// caveat applies to.
+fn is_typescript(rel: &Path) -> bool {
+    rel.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| TS_EXT.contains(&ext))
+}
+
 /// Exit status under `--gate`, as documented on the flag. A number rather
 /// than `ExitCode` so the mapping is testable: `ExitCode` carries no
 /// equality.
@@ -231,37 +381,52 @@ fn gate_code(v: Verdict) -> u8 {
     }
 }
 
-/// Lowers and panel-scores every non-test source in the copy. Test files are
-/// excluded from scoring and mutation both: mutating the suite measures the
-/// suite's self-checks, not the code the panel scored. A file the frontend
-/// cannot lower is reported and skipped rather than aborting the run — one
-/// broken scratch file should not block calibrating the rest of a tree.
-fn score_tree(root: &Path, py: &[PathBuf], python: &str) -> (Vec<ScoredFn>, FileScores) {
+/// Lowers and panel-scores every non-test source of `lang` in the copy. Test
+/// files are excluded from scoring and mutation both: mutating the suite
+/// measures the suite's self-checks, not the code the panel scored. A file
+/// the frontend cannot lower is reported and skipped rather than aborting
+/// the run — one broken scratch file should not block calibrating the rest
+/// of a tree.
+fn score_tree(
+    root: &Path,
+    files: &[PathBuf],
+    lang: Language,
+    python: &str,
+) -> (Vec<ScoredFn>, FileScores) {
     let mut scored = Vec::new();
     let mut file_scores = FileScores::new();
-    for rel in py.iter().filter(|p| !is_test_path(p)) {
-        let lowered = match salience_py::lower_file_with(&root.join(rel), python) {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("calibrate: skipping {}: {e}", rel.display());
-                continue;
-            }
+    for rel in files.iter().filter(|p| !is_test_path(p, lang)) {
+        let functions = match lang {
+            Language::Python => match salience_py::lower_file_with(&root.join(rel), python) {
+                Ok(l) => l.functions,
+                Err(e) => {
+                    eprintln!("calibrate: skipping {}: {e}", rel.display());
+                    continue;
+                }
+            },
+            Language::JavaScript => match salience_js::lower_file(&root.join(rel)) {
+                Ok(l) => l.functions,
+                Err(e) => {
+                    eprintln!("calibrate: skipping {}: {e}", rel.display());
+                    continue;
+                }
+            },
         };
-        for ir in &lowered.functions {
+        for ir in &functions {
             if ir.validate().is_err() || ir.is_empty() || ir.len() > MAX_INSTRUCTIONS {
                 continue;
             }
-            // `<module>`, `<lambda>` and comprehension code objects overlap
-            // the extent of a real def; sampling them would double-count the
-            // same lines and degrade the positional null into noise.
-            if ir.id.name.contains('<') {
+            // Synthetic wrapper functions overlap the extent of a real def;
+            // sampling them would double-count the same lines and degrade
+            // the positional null into noise. See `Language::is_synthetic`.
+            if lang.is_synthetic(&ir.id.name) {
                 continue;
             }
             let sal = analyze_with_scorer(
                 ir,
                 &Denylist::new(),
                 &ScoreWeights::default(),
-                Scorer::Panel(PanelProfile::Instruction),
+                Scorer::Panel(lang.panel_profile()),
             );
             let spans = project_to_lines(ir, &sal);
             let Some(lo) = spans.iter().map(|s| s.start).min() else {
@@ -292,18 +457,22 @@ fn score_tree(root: &Path, py: &[PathBuf], python: &str) -> (Vec<ScoredFn>, File
 }
 
 /// Generates line-targeted mutants for the sampled functions, file by file
-/// in path order, capped by the budget. Returns the mutants and the uncapped
-/// candidate-site count, so the caller can say when it truncated.
+/// in path order, capped by the budget, through `lang`'s mutation engine.
+/// Returns the mutants, the uncapped candidate-site count (so the caller can
+/// say when it truncated) and the count discarded for failing to re-parse
+/// after mutation (JavaScript only — see the module docs).
 fn generate_mutants(
     root: &Path,
     sampled: &[ScoredFn],
+    lang: Language,
     args: &CalibrateArgs,
-) -> Result<(Vec<FileMutant>, usize), Box<dyn Error>> {
+) -> Result<(Vec<FileMutant>, usize, usize), Box<dyn Error>> {
     let mut files: Vec<&PathBuf> = sampled.iter().map(|f| &f.file).collect();
     files.sort();
     files.dedup();
     let mut mutants: Vec<FileMutant> = Vec::new();
     let mut candidates = 0usize;
+    let mut invalid_discarded = 0usize;
     for file in files {
         let mut spans: Vec<(u32, u32)> = sampled
             .iter()
@@ -312,12 +481,22 @@ fn generate_mutants(
             .collect();
         spans.sort_unstable();
         let remaining = args.budget - mutants.len();
-        let set =
-            salience_py::calibrate::mutants_for(&root.join(file), &spans, remaining, &args.python)?;
+        let set: MutantSet = match lang {
+            Language::Python => salience_py::calibrate::mutants_for(
+                &root.join(file),
+                &spans,
+                remaining,
+                &args.python,
+            )?,
+            Language::JavaScript => {
+                salience_js::calibrate::mutants_for(&root.join(file), &spans, remaining)?
+            }
+        };
         candidates += set.total_sites;
+        invalid_discarded += set.invalid_discarded;
         mutants.extend(set.mutants.into_iter().map(|m| (file.clone(), m)));
     }
-    Ok((mutants, candidates))
+    Ok((mutants, candidates, invalid_discarded))
 }
 
 /// Kill/survive counts, overall and per mutated line of the original source.
@@ -498,6 +677,12 @@ fn judge(sampled: &[ScoredFn], file_scores: &FileScores, tally: &Tally) -> Verdi
 struct TreeScan {
     files: Vec<PathBuf>,
     py: Vec<PathBuf>,
+    js: Vec<PathBuf>,
+    /// `node_modules` directories found anywhere in the tree, relative to
+    /// the root. Never descended into for scoring or mutation, but staged
+    /// into the copy (see [`TempTree::create`]) since a `node --test`/`npm
+    /// test` command needs its dependencies to run at all.
+    node_modules: Vec<PathBuf>,
     other_frontend: bool,
     skipped_large: usize,
 }
@@ -506,6 +691,8 @@ fn scan_tree(root: &Path) -> std::io::Result<TreeScan> {
     let mut scan = TreeScan {
         files: Vec::new(),
         py: Vec::new(),
+        js: Vec::new(),
+        node_modules: Vec::new(),
         other_frontend: false,
         skipped_large: 0,
     };
@@ -513,6 +700,8 @@ fn scan_tree(root: &Path) -> std::io::Result<TreeScan> {
     walk(root, root, &mut scan, &mut visited)?;
     scan.files.sort();
     scan.py.sort();
+    scan.js.sort();
+    scan.node_modules.sort();
     Ok(scan)
 }
 
@@ -544,7 +733,18 @@ fn walk(
             Err(e) => return Err(e),
         };
         if meta.is_dir() {
-            if name.starts_with('.') || SKIP_DIRS.contains(&name.as_ref()) {
+            if name.starts_with('.') {
+                continue;
+            }
+            if name == "node_modules" {
+                let rel = path
+                    .strip_prefix(root)
+                    .expect("invariant: the walk never leaves the root")
+                    .to_path_buf();
+                scan.node_modules.push(rel);
+                continue;
+            }
+            if SKIP_DIRS.contains(&name.as_ref()) {
                 continue;
             }
             walk(root, &path, scan, visited)?;
@@ -570,8 +770,10 @@ fn walk(
                 .strip_prefix(root)
                 .expect("invariant: the walk never leaves the root")
                 .to_path_buf();
-            if ext == "py" {
+            if PY_EXT.contains(&ext) {
                 scan.py.push(rel.clone());
+            } else if JS_EXT.contains(&ext) {
+                scan.js.push(rel.clone());
             }
             scan.files.push(rel);
         }
@@ -585,7 +787,7 @@ struct TempTree {
 }
 
 impl TempTree {
-    fn create(src: &Path, files: &[PathBuf]) -> std::io::Result<Self> {
+    fn create(src: &Path, files: &[PathBuf], node_modules: &[PathBuf]) -> std::io::Result<Self> {
         let mut root = std::env::temp_dir();
         root.push(format!("salience-calibrate-{}", std::process::id()));
         // A leftover from a crashed run under the same pid would mix trees.
@@ -601,6 +803,21 @@ impl TempTree {
             }
             std::fs::copy(src.join(rel), dst)?;
         }
+        for rel in node_modules {
+            let dst = tree.root.join(rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            // A symlink keeps a large dependency tree free: nothing under
+            // it is scored or mutated, so the copy only needs it to exist
+            // for `node`/`npm` to resolve `require`/`import`. Falls back to
+            // a full recursive copy when symlinking cannot work — a
+            // sandbox without that permission, or a temp dir on another
+            // filesystem than the source tree.
+            if symlink(src.join(rel), &dst).is_err() {
+                copy_dir_all(&src.join(rel), &dst)?;
+            }
+        }
         Ok(tree)
     }
 }
@@ -611,15 +828,52 @@ impl Drop for TempTree {
     }
 }
 
+/// Recursively copies `src` into `dst`, preserving any symlink it contains
+/// (workspace-linked packages inside `node_modules` are commonly symlinks)
+/// rather than resolving and duplicating its target.
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else if ty.is_symlink() {
+            symlink(std::fs::read_link(entry.path())?, &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// True for files that are part of the test suite rather than the code under
-/// test: `test`/`tests` directories, `test_*.py`, `*_test.py`.
-fn is_test_path(rel: &Path) -> bool {
+/// test. Shared across languages: `test`/`tests` directories, and (for
+/// JavaScript/TypeScript only) `__tests__`. Filename suffixes are
+/// per-language convention: `test_*.py`/`*_test.py` for Python,
+/// `*.test.<ext>`/`*.spec.<ext>` for JavaScript/TypeScript.
+// The `.test`/`.spec` suffix check below is deliberately case-sensitive —
+// it is a filename convention, not a file-extension check — so clippy's
+// file-extension heuristic does not apply here.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+fn is_test_path(rel: &Path, lang: Language) -> bool {
     let in_test_dir = rel.parent().is_some_and(|p| {
-        p.components()
-            .any(|c| matches!(c.as_os_str().to_str(), Some("test" | "tests")))
+        p.components().any(|c| {
+            let name = c.as_os_str().to_str();
+            matches!(name, Some("test" | "tests"))
+                || (lang == Language::JavaScript && name == Some("__tests__"))
+        })
     });
     let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    in_test_dir || name.starts_with("test_") || name.ends_with("_test.py")
+    let by_name = match lang {
+        Language::Python => name.starts_with("test_") || name.ends_with("_test.py"),
+        Language::JavaScript => JS_EXT.iter().any(|ext| {
+            name.strip_suffix(&format!(".{ext}"))
+                .is_some_and(|base| base.ends_with(".test") || base.ends_with(".spec"))
+        }),
+    };
+    in_test_dir || by_name
 }
 
 /// Runs the test command with a hard wall-clock limit.
@@ -693,5 +947,56 @@ mod tests {
         assert_eq!(gate_code(Verdict::Marginal), 0);
         assert_eq!(gate_code(Verdict::InsufficientData), 2);
         assert_eq!(gate_code(Verdict::Uncalibrated), 3);
+    }
+
+    /// The Python directory/suffix rules are exactly what they were before
+    /// this module gained JavaScript support — `__tests__` and
+    /// `.test.py`/`.spec.py` conventions are JavaScript-only additions and
+    /// must never start matching Python paths.
+    #[test]
+    fn python_test_path_rule_is_unchanged() {
+        assert!(is_test_path(
+            Path::new("pkg/tests/test_foo.py"),
+            Language::Python
+        ));
+        assert!(is_test_path(Path::new("test_foo.py"), Language::Python));
+        assert!(is_test_path(Path::new("foo_test.py"), Language::Python));
+        assert!(!is_test_path(
+            Path::new("pkg/__tests__/foo.py"),
+            Language::Python
+        ));
+        assert!(!is_test_path(Path::new("foo.spec.py"), Language::Python));
+        assert!(!is_test_path(Path::new("pkg/foo.py"), Language::Python));
+    }
+
+    #[test]
+    fn javascript_test_path_conventions() {
+        assert!(is_test_path(
+            Path::new("pkg/tests/foo.js"),
+            Language::JavaScript
+        ));
+        assert!(is_test_path(
+            Path::new("pkg/__tests__/foo.js"),
+            Language::JavaScript
+        ));
+        assert!(is_test_path(Path::new("foo.test.ts"), Language::JavaScript));
+        assert!(is_test_path(
+            Path::new("foo.spec.tsx"),
+            Language::JavaScript
+        ));
+        assert!(!is_test_path(Path::new("pkg/foo.js"), Language::JavaScript));
+    }
+
+    #[test]
+    fn synthetic_name_filter_differs_by_language() {
+        assert!(Language::Python.is_synthetic("<module>"));
+        assert!(Language::Python.is_synthetic("<lambda>"));
+        assert!(!Language::Python.is_synthetic("checkout"));
+
+        assert!(Language::JavaScript.is_synthetic("<module>"));
+        // JS anonymous functions must stay scorable: excluding them the way
+        // Python excludes lambdas would drop most real JS code.
+        assert!(!Language::JavaScript.is_synthetic("<fn@12>"));
+        assert!(!Language::JavaScript.is_synthetic("checkout"));
     }
 }

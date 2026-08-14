@@ -12,7 +12,10 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde::Deserialize;
+// Re-exported so existing callers of `salience_py::calibrate::{Mutant,
+// MutantSet}` keep working now that the wire type moved to salience-core —
+// see that module's docs for why it moved.
+pub use salience_core::mutant::{Mutant, MutantSet};
 
 use crate::PyError;
 
@@ -24,34 +27,6 @@ const CALIBRATE_PY: &str = include_str!("calibrate.py");
 /// harness does), and under a shared name one call's `remove_file` can land
 /// between another's write and the interpreter opening the script.
 static SCRIPT_SEQ: AtomicUsize = AtomicUsize::new(0);
-
-/// One line-targeted mutant: the whole file with a single AST edit applied.
-///
-/// Derives `Deserialize` directly rather than through a mirror struct: the
-/// mirror pattern in the crate root exists to keep salience-core free of a
-/// serialization contract, and no core type is involved here.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Mutant {
-    /// Line of the edit in the *original* source — the line the panel scored.
-    /// The mutated text below is re-serialized and its own line numbers drift.
-    pub line: u32,
-    /// Operator family: `cmp`, `bin`, `aug`, `bool`, `const` or `delete`.
-    pub kind: String,
-    /// Human-readable edit, e.g. `GtE -> Gt`.
-    pub detail: String,
-    /// Full mutated file content, ready to write over the copy.
-    pub source: String,
-}
-
-/// What the generator found and what it emitted.
-#[derive(Debug, Clone, Deserialize)]
-pub struct MutantSet {
-    /// Sites found inside the requested spans, before the cap. When this
-    /// exceeds `mutants.len()`, the caller truncated and must say so.
-    pub total_sites: usize,
-    /// At most the requested number of mutants, sorted by line.
-    pub mutants: Vec<Mutant>,
-}
 
 /// Generates up to `limit` mutants whose sites fall inside `spans`
 /// (inclusive line ranges). `limit == 0` counts sites without emitting.
@@ -71,6 +46,7 @@ pub fn mutants_for(
         return Ok(MutantSet {
             total_sites: 0,
             mutants: Vec::new(),
+            invalid_discarded: 0,
         });
     }
     // Same temp-file-not-`-c` choice as the lowering, so tracebacks carry
