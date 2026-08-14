@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/vercel/ms.git",
+  "commit": "4ff48cec099f0514c3e9bbca18706c9c21122bfb",
+  "language": "javascript",
+  "test_cmd": "npm test",
+  "mutants_executed": 60,
+  "invalid": 0,
+  "panel_rho": 0.526,
+  "null_rho": -0.151,
+  "verdict": "calibrated"
+}
