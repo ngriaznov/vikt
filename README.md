@@ -355,6 +355,7 @@ salience path/to/package --package foo      # whole cargo package, deps compiled
 salience foo.py --scorer strahler           # one instrument alone
 salience foo.py --scorer current            # the incumbent alone
 salience big.py --max-instructions 0        # lift the data-table size guard
+salience foo.py --format sarif              # SARIF 2.1.0 for code scanning
 ```
 
 `--scorer` selects which algorithm produces the continuous score: `panel`
@@ -371,6 +372,50 @@ ranks *backwards*. The panel beats them all precisely because their
 failures do not overlap. Use a single instrument to re-fit weights against
 new labels, to see which facet drove a surprising score, or to verify a
 refactor left a member byte-identical — never as the score a consumer reads.
+
+### SARIF output
+
+`--format sarif` emits SARIF 2.1.0 instead of the sidecar: one `note`-level
+result per reported line, ingestible by GitHub Code Scanning (via
+`github/codeql-action/upload-sarif`) and any other SARIF consumer.
+`--sarif-tiers` selects which tiers become results — `core` (the default)
+or `core,boundary`; plumbing and inert are never emitted, because reporting
+them would bury the signal on any real file.
+
+```bash
+salience foo.py --format sarif > salience.sarif
+```
+
+### Self-calibration: `salience calibrate`
+
+The numbers above say how the panel performs on the corpora it was measured
+against. `salience calibrate` measures it on *your* repository, with no
+rater in the loop: it mutates lines the panel scored, lets the repository's
+own test suite decide which mutants die, and reports the Spearman
+correlation between panel score and per-line kill rate — next to the same
+positional null the bakeoffs use, because a panel that cannot beat "earlier
+is more important" on a tree has nothing to offer it.
+
+```bash
+salience calibrate path/to/repo --test-cmd "python3 -m unittest"
+```
+
+The test command runs with `sh -c` from the root of a temporary copy of the
+tree. Every mutation happens in that copy; the input tree is never opened
+for writing, and an integration test holds this to byte-identity. The
+verdict is `calibrated` (panel ρ beats the null by ≥ 0.1 and clears 0.3 on
+its own), `marginal`, `uncalibrated`, or `insufficient data` (fewer than 20
+scored lines or 30 executed mutants). With `--gate` the exit code carries
+it — 0 for calibrated or marginal, 2 for insufficient data, 3 for
+uncalibrated; without the flag, exit status only reports whether the
+measurement itself ran.
+
+Limits: Python sources only for now (mutation needs an AST round-trip and
+a test-command convention, and the Python frontend is the one that ships
+both); the mutant budget is capped (default 150 mutants over the 12 largest
+scored functions, `--budget` and `--sample` to change), and hitting the cap
+is reported, never silent; and the suite must pass on the unmutated copy
+before anything is mutated — a failing baseline aborts the run.
 
 Reproduce the scale run (fetches six production codebases, ~2M instructions,
 and prints the per-corpus summary; see `eval/RESULTS-corpus-scale.md` for the
@@ -501,12 +546,15 @@ enters that loop.
 
 ## Tests
 
-84 tests: 32 in the core over hand-built IR (pinning each instrument's
+112 tests: 32 in the core over hand-built IR (pinning each instrument's
 algorithm and the panel's weights rather than any frontend's lowering), 17
-integration tests over the analysis pipeline, 11 over real SMAP attribute
-text and synthetic state machines, 8 over real `javac -g` and `kotlinc`
-output, 5 over real CPython bytecode, 10 over real oxc lowering of
-JavaScript and TypeScript, 1 doctest. The JVM, Python and JS suites assert
+integration tests over the analysis pipeline, 10 over the SARIF projection
+and the calibration statistics, 11 over real SMAP attribute text and
+synthetic state machines, 8 over real `javac -g` and `kotlinc` output, 5
+over real CPython bytecode, 4 over the Python mutant generator, 10 over
+real oxc lowering of JavaScript and TypeScript, 4 over real MIR lowering
+of Rust, 10 over the CLI (including a calibration run that asserts the
+input tree comes out byte-identical), 1 doctest. The JVM, Python and JS suites assert
 the *same* behavioral claims against equivalent source — the accumulator
 that reaches a state write is core, the counter that only feeds logging is
 inert — which is the multi-language claim stated as a test.

@@ -5,6 +5,8 @@
 //! salience Foo.class                 # JSON sidecar on stdout
 //! salience foo.py --annotate Foo.py  # tiered source view
 //! salience Foo.class --stats         # tier histogram and timing
+//! salience foo.py --format sarif     # SARIF 2.1.0 for code-scanning uploads
+//! salience calibrate src/ --test-cmd "python3 -m unittest"  # self-calibration
 //! ```
 
 #![forbid(unsafe_code)]
@@ -14,13 +16,17 @@
 // Line counts are small; the f64 cast in the histogram cannot lose anything.
 #![allow(clippy::cast_precision_loss, clippy::doc_markdown)]
 
+mod calibrate;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use salience_core::ir::FunctionIr;
-use salience_core::{Denylist, PanelProfile, ScoreWeights, Scorer, Sidecar, analyze_with_scorer};
+use salience_core::{
+    Denylist, PanelProfile, SarifLog, ScoreWeights, Scorer, Sidecar, Tier, analyze_with_scorer,
+};
 
 /// Output shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -29,6 +35,20 @@ enum Format {
     Json,
     /// One line per span, for reading in a terminal.
     Text,
+    /// SARIF 2.1.0, one `note` result per reported line, for code-scanning
+    /// uploads. `--sarif-tiers` selects which tiers are reported.
+    Sarif,
+}
+
+/// CLI surface of the SARIF tier filter. Only the two tiers a code-scanning
+/// consumer can act on are offered: plumbing and inert annotations would
+/// outnumber the signal on any real file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum SarifTier {
+    /// Behavior-carrying lines.
+    Core,
+    /// Frontier lines: returns, throws, state writes, opaque calls.
+    Boundary,
 }
 
 #[derive(Debug, Parser)]
@@ -39,15 +59,36 @@ enum Format {
 plumbing or inert, and projects the result onto source lines.\n\n\
 Accepts a JVM .class file or a Python source file. No model runs: every tier is \
 the output of a dominance, loop or reachability query, and every span carries \
-the reason that produced it."
+the reason that produced it.",
+    // The analyze surface stays flag-style; `calibrate` is the one verb-shaped
+    // operation. These two settings are what let a positional input and a
+    // subcommand share the top level without either becoming spuriously
+    // optional.
+    args_conflicts_with_subcommands = true,
+    subcommand_negates_reqs = true
 )]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Cmd>,
+
     /// The `.class` or `.py` file to analyze.
-    input: PathBuf,
+    #[arg(required = true)]
+    input: Option<PathBuf>,
 
     /// Output format.
     #[arg(long, value_enum, default_value_t = Format::Json)]
     format: Format,
+
+    /// Tiers reported as SARIF results, comma-separated. Only consulted with
+    /// `--format sarif`.
+    #[arg(
+        long,
+        value_enum,
+        value_delimiter = ',',
+        default_value = "core",
+        value_name = "TIERS"
+    )]
+    sarif_tiers: Vec<SarifTier>,
 
     /// Print the source with each line marked by tier. Requires the source file
     /// when analyzing bytecode, since a class file does not carry it.
@@ -90,6 +131,15 @@ struct Args {
     /// reported on stderr, never silently dropped.
     #[arg(long, value_name = "N", default_value_t = 4096)]
     max_instructions: usize,
+}
+
+/// The one verb the CLI grows beyond analysis.
+#[derive(Debug, Subcommand)]
+enum Cmd {
+    /// Self-calibrate on a repository: mutate lines the panel scored, let the
+    /// repository's own test suite kill mutants, and report whether the panel
+    /// ordering agrees with the kill rates. Python sources only for now.
+    Calibrate(calibrate::CalibrateArgs),
 }
 
 /// CLI surface of [`Scorer`].
@@ -150,17 +200,22 @@ fn profile_for_ext(ext: &str) -> PanelProfile {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("salience: {e}");
-            ExitCode::FAILURE
-        }
-    }
+    let result = match &args.command {
+        Some(Cmd::Calibrate(c)) => calibrate::run(c),
+        None => run(&args).map(|()| ExitCode::SUCCESS),
+    };
+    result.unwrap_or_else(|e| {
+        eprintln!("salience: {e}");
+        ExitCode::FAILURE
+    })
 }
 
 #[allow(clippy::too_many_lines)] // one match arm per substrate; splitting hides the shape
 fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let input = args
+        .input
+        .as_deref()
+        .expect("invariant: clap requires the input whenever no subcommand is given");
     let mut denylist = if args.no_denylist {
         Denylist::empty()
     } else {
@@ -171,12 +226,12 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let weights = ScoreWeights::default();
 
-    let is_crate_input = args.input.is_dir()
-        || args.input.file_name().and_then(|f| f.to_str()) == Some("Cargo.toml");
+    let is_crate_input =
+        input.is_dir() || input.file_name().and_then(|f| f.to_str()) == Some("Cargo.toml");
     let ext = if is_crate_input {
         "rs"
     } else {
-        args.input
+        input
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or_default()
@@ -185,7 +240,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let lower_started = Instant::now();
     let (generator, functions, note) = match ext {
         "class" => {
-            let bytes = std::fs::read(&args.input)?;
+            let bytes = std::fs::read(input)?;
             let lowered = salience_jvm::lower_class(&bytes)?;
             let note = lowered.smap_stratum.as_ref().map(|stratum| {
                 format!(
@@ -206,21 +261,21 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             ("salience-jvm/mokapot".to_owned(), lowered.functions, note)
         }
         "py" => {
-            let lowered = salience_py::lower_file_with(&args.input, &args.python)?;
+            let lowered = salience_py::lower_file_with(input, &args.python)?;
             ("salience-py/dis".to_owned(), lowered.functions, None)
         }
         "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => {
-            let lowered = salience_js::lower_file(&args.input)?;
+            let lowered = salience_js::lower_file(input)?;
             ("salience-js/oxc".to_owned(), lowered.functions, None)
         }
         "rs" => {
             let functions = if is_crate_input {
                 // Whole package through cargo: every source file of the
                 // primary package, dependencies compiled but not analyzed.
-                let modules = salience_rs::lower_crate(&args.input, args.package.as_deref())?;
+                let modules = salience_rs::lower_crate(input, args.package.as_deref())?;
                 modules.into_iter().flat_map(|m| m.functions).collect()
             } else {
-                salience_rs::lower_file(&args.input)?.functions
+                salience_rs::lower_file(input)?.functions
             };
             ("salience-rs/rustc_public".to_owned(), functions, None)
         }
@@ -234,7 +289,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let file_label = functions
         .first()
-        .map_or_else(|| args.input.display().to_string(), |f| f.id.file.clone());
+        .map_or_else(|| input.display().to_string(), |f| f.id.file.clone());
     let mut sidecar = Sidecar::new(file_label, generator);
 
     let lowering = lower_started.elapsed();
@@ -271,6 +326,28 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     match args.format {
         Format::Json => println!("{}", serde_json::to_string_pretty(&sidecar)?),
         Format::Text => print_text(&sidecar),
+        Format::Sarif => {
+            let tiers: Vec<Tier> = args
+                .sarif_tiers
+                .iter()
+                .map(|t| match t {
+                    SarifTier::Core => Tier::Core,
+                    SarifTier::Boundary => Tier::Boundary,
+                })
+                .collect();
+            // Crate mode has a root to relativize file paths against; a
+            // single-file input's path passes through as the artifact
+            // recorded it.
+            let root = is_crate_input.then(|| {
+                if input.is_dir() {
+                    input.to_path_buf()
+                } else {
+                    input.parent().unwrap_or(Path::new("")).to_path_buf()
+                }
+            });
+            let log = SarifLog::from_sidecar(&sidecar, &tiers, root.as_deref());
+            println!("{}", serde_json::to_string_pretty(&log)?);
+        }
     }
 
     if let Some(source) = &args.annotate {

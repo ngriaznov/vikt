@@ -28,6 +28,8 @@
 // not identifiers.
 #![allow(clippy::doc_markdown)]
 
+pub mod calibrate;
+
 use std::io::Write as _;
 use std::path::Path;
 use std::process::Command;

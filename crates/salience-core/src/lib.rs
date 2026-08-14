@@ -80,16 +80,19 @@
 )]
 
 pub mod artifact;
+pub mod calibration;
 pub mod graph;
 pub mod ir;
 pub mod panel;
 pub mod pivot;
 pub mod salience;
+pub mod sarif;
 pub mod schur;
 pub mod strahler;
 pub mod trophic;
 
 pub use artifact::{Sidecar, SpanRecord};
+pub use calibration::{Verdict, spearman, verdict};
 pub use graph::Graph;
 pub use ir::{FunctionId, FunctionIr, IrError, Node, NodeKind};
 pub use panel::PanelProfile;
@@ -97,3 +100,4 @@ pub use salience::{
     Denylist, FunctionSalience, LineSpan, NodeSalience, Reason, ScoreWeights, Scorer, Tier,
     analyze, analyze_with_scorer, project_to_lines,
 };
+pub use sarif::SarifLog;
