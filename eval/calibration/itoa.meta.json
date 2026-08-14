@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/dtolnay/itoa.git",
+  "commit": "1577ed901354d0d7448ac162328f9dbf5183124c",
+  "language": "rust",
+  "test_cmd": "cargo test --quiet",
+  "mutants_executed": 13,
+  "invalid": 0,
+  "panel_rho": -0.433,
+  "null_rho": 0.020,
+  "verdict": "insufficient data"
+}
