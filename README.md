@@ -584,6 +584,16 @@ cargo test
 JVM, Kotlin and Python tests skip rather than fail when no JDK, `kotlinc` or
 interpreter is present.
 
+## Development setup
+
+One-time, per clone — activates the versioned git hooks in `.githooks/`
+(currently a `commit-msg` hook that strips AI attribution trailers from
+commit messages):
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## License
 
 MIT OR Apache-2.0.

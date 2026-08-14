@@ -1,0 +1,12 @@
+#!/bin/sh
+# Strips AI attribution trailers from every commit message, so tooling that
+# appends them cannot reintroduce a Claude contributor entry. Activate once
+# per clone with:  git config core.hooksPath .githooks
+msg="$1"
+tmp="$msg.stripped"
+grep -vi -e '^co-authored-by:.*claude' -e '^claude-session:' "$msg" > "$tmp" || true
+if [ -s "$tmp" ]; then
+    mv "$tmp" "$msg"
+else
+    rm -f "$tmp"
+fi
