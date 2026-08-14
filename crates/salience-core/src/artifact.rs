@@ -1,9 +1,9 @@
 //! The sidecar artifact: line ranges to tier, with a reason for each.
 //!
 //! This is the whole deliverable. Everything upstream exists to produce it, and
-//! every consumer — an agent reading a file, a harness hook gating an edit, a
-//! profiler picking a starting point, a dependency graph weighting its nodes —
-//! reads this and nothing else.
+//! every consumer (an agent reading a file, a harness hook gating an edit, a
+//! profiler picking a starting point, a dependency graph weighting its
+//! nodes) reads this and nothing else.
 //!
 //! Two design commitments show up in the schema:
 //!

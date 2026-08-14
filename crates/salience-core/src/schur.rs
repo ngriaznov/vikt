@@ -4,7 +4,7 @@
 //! cone size, control-dominance weight, loop depth and effect-ness by fixed
 //! weights. This module answers a narrower, more literal question instead:
 //! **if this statement were deleted, how much less influence would the
-//! function deliver to its outputs?** — computed exactly, in closed form,
+//! function deliver to its outputs?**: computed exactly, in closed form,
 //! rather than approximated by a proxy statistic.
 //!
 //! # The network
@@ -228,7 +228,7 @@ pub fn score(ir: &FunctionIr, graph: &Graph, denylist: &Denylist) -> Vec<f64> {
         // meaning the function's entire observable behaviour *is* its
         // output statement(s). There is no flow to attribute, so fall back
         // to reporting these as maximally salient rather than a wall of
-        // zeros — see the "single node" test.
+        // zeros. See the "single node" test.
         for v in 0..n {
             if omega[v] {
                 out[v] = 1.0;
@@ -400,7 +400,7 @@ impl System {
                 } else if let Some(j) = local_of[u] {
                     q[i].push((j, p));
                 }
-                // else: u is outside S — leaked mass, part of neither.
+                // else: u is outside S: leaked mass, part of neither.
             }
         }
 
@@ -496,7 +496,7 @@ fn compute_d(q: &[Vec<(usize, f64)>], comps: &[Vec<NodeId>]) -> Vec<f64> {
                 d[v] = diag[li].max(1.0);
             }
         }
-        // Oversized or ill-conditioned: leave D_v at 1.0 — the documented
+        // Oversized or ill-conditioned: leave D_v at 1.0: the documented
         // fallback (no loop-persistence credit) rather than an O(|C|^3) risk.
     }
     d
@@ -628,7 +628,7 @@ fn build_matrix(edges: &[Vec<(usize, f64)>], members: &[NodeId], local: &[usize]
 }
 
 /// In-place LU decomposition with partial pivoting (largest magnitude in the
-/// remaining column, ties broken by lowest row index — deterministic).
+/// remaining column, ties broken by lowest row index: deterministic).
 /// Returns `None`, rather than a near-singular factorisation, the moment any
 /// pivot's magnitude falls below [`PIVOT_EPS`].
 fn lu_decompose(mat: &mut [f64], k: usize) -> Option<Vec<usize>> {

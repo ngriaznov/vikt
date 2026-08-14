@@ -1,6 +1,6 @@
 //! Batch evaluation over a real corpus.
 //!
-//! Not part of the shipped tool — this exists to answer three questions the
+//! Not part of the shipped tool: this exists to answer three questions the
 //! unit tests cannot: does it survive real code, how fast is it at scale, and
 //! what does the tier distribution actually look like when nobody constructed
 //! the input.

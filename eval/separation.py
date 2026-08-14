@@ -18,7 +18,7 @@ scorer cannot win by knowing that one function is more important than another.
 
 Two targets, same as everywhere else in this directory: the blind reader labels
 (noise = importance <= 3, load-bearing = importance >= 7) and the rater-free
-mutation oracle (noise = leverage <= 0.15, load-bearing = leverage >= 0.60).
+mutation oracle (noise = use <= 0.15, load-bearing = use >= 0.60).
 """
 import json
 import sys

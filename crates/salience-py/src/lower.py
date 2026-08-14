@@ -188,7 +188,7 @@ def lower_code(code, file):
         return None
     offsets = {ins.offset: idx for idx, ins in enumerate(instrs)}
 
-    # EXC_EDGE_NOTE — exception edges are OFF by default, and that is a measured
+    # EXC_EDGE_NOTE: exception edges are OFF by default, and that is a measured
     # decision rather than an oversight.
     #
     # Without them, an `except` body is unreachable from the entry, so its

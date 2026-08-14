@@ -148,7 +148,7 @@ pub fn lower_file(path: &Path) -> Result<LoweredModule, PyError> {
 /// Lowers a Python source file using a named interpreter.
 ///
 /// Useful when the code under analysis targets a different minor version than
-/// the ambient one — bytecode is version-specific, so lowering 3.12 source with
+/// the ambient one: bytecode is version-specific, so lowering 3.12 source with
 /// a 3.9 interpreter would describe a program that never runs.
 ///
 /// # Errors

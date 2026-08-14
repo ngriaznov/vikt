@@ -136,7 +136,7 @@ fn callee_name(func: &Operand) -> String {
 /// Line of `span`, or `None` when the span points into another file - a
 /// macro expansion whose tokens live in std's source, for instance. Foreign
 /// lines projected onto the local file would be nonsense; a node with no
-/// line still participates in the analysis and simply projects nowhere,
+/// line still participates in the analysis and projects nowhere,
 /// the same policy the JVM frontend applies to SMAP-foreign lines.
 fn line_of(span: rustc_public::ty::Span, local_file: &str) -> Option<u32> {
     if span.get_filename() != local_file {

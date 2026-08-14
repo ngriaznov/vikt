@@ -9,19 +9,19 @@
 //!
 //! # The analogy
 //!
-//! A river network's springs — the tributaries with no water flowing into
-//! them — are order 1. When two streams of *equal* order `k` meet, the
+//! A river network's springs, the tributaries with no water flowing into
+//! them, are order 1. When two streams of *equal* order `k` meet, the
 //! confluence continues as order `k + 1`: two order-1 creeks make an order-2
 //! stream, two order-2 streams make an order-3 river. When a higher-order
 //! stream absorbs a lower-order tributary, nothing changes: the higher order
 //! wins outright, because one more small creek joining a river does not make
-//! it a bigger river. The network's mainstem — the Mississippi among its
-//! thousands of named creeks — is, by construction, wherever the order is
+//! it a bigger river. The network's mainstem, the Mississippi among its
+//! thousands of named creeks, is, by construction, wherever the order is
 //! highest: not the longest path, not the most tributaries by count, but the
 //! point every major branch has funneled into.
 //!
-//! In a function, dataflow is the water. Constants and parameters — values
-//! with nothing feeding them — are springs. A statement where two
+//! In a function, dataflow is the water. Constants and parameters, values
+//! with nothing feeding them, are springs. A statement where two
 //! independently-derived values are combined is a confluence. The statement
 //! carrying the highest order is the one a reader would call the "real" work:
 //! not necessarily the busiest node, but the one every major derivation
@@ -158,7 +158,7 @@ fn component_orders(n: usize, succ: &[Vec<NodeId>]) -> Vec<u32> {
     // component's *upstream* neighbours (the ones with an edge pointing INTO
     // it) always sit at a strictly higher id, and visiting ids from high to
     // low finishes every upstream component before its downstream
-    // confluence is computed — no separate topological sort needed.
+    // confluence is computed, no separate topological sort needed.
     let mut order = vec![0u32; ncomp];
     for component in (0..ncomp).rev() {
         let Some(&max_upstream) = upstream[component]

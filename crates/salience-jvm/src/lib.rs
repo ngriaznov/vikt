@@ -172,7 +172,7 @@ fn is_generated(method: &Method) -> bool {
         .intersects(method::AccessFlags::SYNTHETIC | method::AccessFlags::BRIDGE)
 }
 
-/// Lowers one method, returning it alongside the number of instructions whose
+/// Lowers one method, returning it with the number of instructions whose
 /// line belonged to another file. `None` if MokaIR generation fails.
 fn lower_method(
     method: &Method,
@@ -221,7 +221,7 @@ fn lower_method(
             .unwrap_or_default();
 
         // Raw table line -> real source line. Without the SMAP step this is
-        // where Kotlin inline call sites acquire lines past the end of the
+        // where Kotlin inline call sites get lines past the end of the
         // file, and where standard-library code gets attributed to the user's.
         let raw_line = line_for(&line_table, *pc);
         let line = match (raw_line, source_map) {

@@ -166,7 +166,7 @@ impl SourceMap {
         }
 
         // Prefer KotlinDebug, then the declared default, then anything with
-        // mappings — in a fixed order so the result is reproducible.
+        // mappings: in a fixed order so the result is reproducible.
         let chosen = ["KotlinDebug", default_stratum.as_str()]
             .into_iter()
             .find(|s| strata.get(*s).is_some_and(|e| !e.0.is_empty()))
@@ -328,7 +328,7 @@ demo/Processor\n\
         assert_eq!(map.stratum(), "KotlinDebug");
     }
 
-    /// The headline fix: the four impossible lines an 80-line file was reporting
+    /// The headline fix: the four impossible lines an 80-line file reported
     /// all collapse onto the call site.
     #[test]
     fn inlined_body_collapses_onto_the_call_site() {

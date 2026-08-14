@@ -10,8 +10,8 @@
 //! | `plumbing` | present but not behavior-carrying: local shuffling, results that reach no effect |
 //! | `inert` | denylisted calls (logging, metrics, tracing) and the computation that exists only to feed them |
 //!
-//! Alongside the tier, every span carries a continuous score in `0.0..=1.0`.
-//! The tier is for policy — an edit-gating hook wants a predicate. The score is
+//! With the tier, every span carries a continuous score in `0.0..=1.0`.
+//! The tier is for policy. An edit-gating hook wants a predicate. The score is
 //! for ranking — a weighted call graph, a profiler choosing where to start, or a
 //! vulnerability triage queue wants an ordering, and four buckets throw away the
 //! gradient between a predicate guarding two lines and one guarding forty.
@@ -32,7 +32,7 @@
 //!
 //! Intraprocedural. Calls are atoms at the abstraction frontier: a call into a
 //! dependency is an effect, and its body is never analyzed. That is a
-//! deliberate ceiling, not a missing feature — it keeps the cost per function
+//! deliberate ceiling, not a missing feature. It keeps the cost per function
 //! bounded and independent of how large the dependency graph is.
 //!
 //! # Multi-language

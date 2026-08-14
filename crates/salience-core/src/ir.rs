@@ -38,7 +38,7 @@ pub enum CallOpacity {
     /// An atom at the abstraction frontier: the callee's body is never
     /// analyzed, so the call is treated as an effect.
     Opaque,
-    /// A call known to carry no behavior — logging, metrics, tracing. Matched
+    /// A call known to carry no behavior: logging, metrics, tracing. Matched
     /// against the [`Denylist`](crate::Denylist), never inferred.
     Inert,
 }
@@ -121,7 +121,7 @@ impl NodeKind {
 pub struct Node {
     /// Source line this instruction was lowered from, if the substrate carries
     /// one. `None` for compiler-synthesized instructions with no source
-    /// position — these still participate in the analysis but project onto no
+    /// position: these still participate in the analysis but project onto no
     /// line, which is exactly the behavior we want for synthetic constructs.
     pub line: Option<u32>,
     /// What this instruction does.
@@ -224,7 +224,7 @@ impl FunctionIr {
         self.nodes.len()
     }
 
-    /// Whether the function has no instructions — an abstract or native method,
+    /// Whether the function has no instructions: an abstract or native method,
     /// or a body the substrate declined to lower.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -240,7 +240,7 @@ impl FunctionIr {
         self.nodes.iter().filter_map(|n| n.line).collect()
     }
 
-    /// Nodes that are effects — the anchors of the backward slice.
+    /// Nodes that are effects, the anchors of the backward slice.
     #[must_use]
     pub fn effects(&self) -> Vec<NodeId> {
         (0..self.nodes.len())

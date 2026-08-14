@@ -47,7 +47,7 @@
 //! ## What stands in for failure probability
 //!
 //! Nothing is estimated or trained. `p_v = 1/2` is not a guess at how buggy a
-//! statement is — it is the point at which the Birnbaum derivative becomes a
+//! statement is. It is the point at which the Birnbaum derivative becomes a
 //! pure combinatorial count: the maximum-entropy prior over Boolean component
 //! states, and the standard probability-free device in this literature
 //! (Barlow & Proschan). `w_o`, the per-output weight (default `1`), is a
@@ -207,7 +207,7 @@ pub(crate) fn birnbaum_scores(ir: &FunctionIr, graph: &Graph) -> Vec<f64> {
 /// is a claim about relative standing inside a body"): take `ln(B_v)` and
 /// rescale it linearly against *this function's* own `[min, max]` of
 /// positive values. The geometric decay that caused the problem is exactly
-/// what makes the log-domain the right one to rescale in — it turns an
+/// what makes the log-domain the right one to rescale in. It turns an
 /// order-of-magnitude spread into a linear one, which two decimal places can
 /// represent. Nodes with `B_v = 0` (no path to any output) stay at `0.0`;
 /// a function where every reachable node ties at the same positive `B_v`
@@ -450,7 +450,7 @@ mod tests {
     }
 
     /// Degenerate case: a single instruction that is itself the sole output.
-    /// A 1-component system's Birnbaum importance is always exactly 1 — the
+    /// A 1-component system's Birnbaum importance is always exactly 1. The
     /// component is the whole system, so flipping it always flips delivery.
     /// Also exercises `n = 0` (no instructions at all) and `n = 1` (an entry
     /// that is simultaneously the pinned output), the two smallest inputs the

@@ -222,7 +222,7 @@ impl Denylist {
         }
     }
 
-    /// An empty denylist — nothing is treated as inert.
+    /// An empty denylist: nothing is treated as inert.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -381,7 +381,7 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
     // no hard effect" held and the read scored 0.00. One debug print poisoned
     // the whole variable.
     //
-    // The fix is to ask the opposite question. Compute the set of *useful*
+    // Ask the opposite question. Compute the set of *useful*
     // statements as backward reachability from useful sinks — every anchor
     // (return, throw, state write) and every call that is not denylisted — and
     // call a statement inert only if it is not useful. Now `len(line)` is a
@@ -403,7 +403,7 @@ pub fn analyze(ir: &FunctionIr, denylist: &Denylist, weights: &ScoreWeights) -> 
     // every predicate in the program inert is exactly as wrong as it sounds
     // (measured: 58% of lines in large functions).
     // Seeds are the statements that are useful *in themselves*: hard effects,
-    // and calls made purely for their side effect — those whose result nobody
+    // and calls made purely for their side effect. Those whose result nobody
     // reads. Everything else earns usefulness by feeding one.
     //
     // "Calls made for their side effect" rather than "all calls" is the
@@ -597,8 +597,8 @@ fn score_of(
     }
     // Normalised against the most influential statement in *this* function
     // rather than against its instruction count. Dividing by size makes every
-    // statement in a large body score near zero — measured, half of all lines
-    // landed within 0.01 of each other — which is the opposite of what a
+    // statement in a large body score near zero (measured, half of all lines
+    // landed within 0.01 of each other), which is the opposite of what a
     // heatmap needs. Salience is a claim about relative standing inside a body,
     // so the scale should be the body's own.
     let (peak_influence, peak_depends) = peaks;
@@ -773,14 +773,14 @@ pub struct LineSpan {
 /// Aggregation across the instructions on one line is a `max` over tiers, with
 /// one deliberate asymmetry: `inert` is the *weakest* tier here, even though a
 /// denylist match is the *strongest* signal at the node level. A line holding
-/// both a log call and real work is not inert — the log call merely happens to
+/// both a log call and real work is not inert. The log call merely happens to
 /// share it. Ordering [`Tier`] by salience makes that fall out of `max`.
 #[must_use]
 pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan> {
     // Reasons are carried with the tier they imply so the aggregate can be
     // ordered by salience. A line holding both a core statement and a plumbing
     // one must lead with the core reason: a consumer reading only the first
-    // entry — a hook message, a gutter tooltip — would otherwise be told the
+    // entry (a hook message, a gutter tooltip) would otherwise be told the
     // line is inconsequential precisely when it is not.
     let mut per_line: BTreeMap<u32, LineAccum> = BTreeMap::new();
     for ns in &sal.nodes {
@@ -819,7 +819,7 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionSalience) -> Vec<LineSpan
     // 0.49. No heatmap finer than the tier partition could be drawn from that,
     // and any rank correlation measured against per-line labels was measuring a
     // step function rather than the scorer. Requiring the scores to agree keeps
-    // the compaction where it is real - a run of genuinely identical plumbing
+    // the compaction where it is real - a run of identical plumbing
     // still collapses to one span - and keeps the gradient everywhere else.
     let mut spans: Vec<LineSpan> = Vec::new();
     for (line, (tier, score, mut reasons)) in per_line {

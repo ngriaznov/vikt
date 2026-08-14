@@ -10,7 +10,7 @@
 //! and the source's control flow *is* the program's. A semantic-resolved AST
 //! with an explicitly constructed CFG is therefore the faithful substrate,
 //! not a compromise. TypeScript rides free: oxc parses it natively and type
-//! annotations simply don't produce lowered nodes.
+//! annotations don't produce lowered nodes.
 //!
 //! # Granularity
 //!

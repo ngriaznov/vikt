@@ -51,7 +51,7 @@
 //! serve both substrates.
 //!
 //! The weights are baked as constants rather than loaded from a file: the
-//! panel is a *shipped strategy*, not a tunable — retuning belongs in eval/,
+//! panel is a *shipped strategy*, not a tunable: retuning belongs in eval/,
 //! with fresh blind labels, not in production flags.
 
 use std::collections::BTreeMap;
@@ -78,7 +78,7 @@ use crate::salience::{Denylist, FunctionSalience, Tier};
 /// selected.
 ///
 /// Do not hand-edit: these are the ridge coefficients from the oracle fit,
-/// and the held-out number quoted alongside them is only true of exactly
+/// and the held-out number quoted with them is only true of exactly
 /// these values.
 pub const INSTRUCTION_WEIGHTS: [f64; 7] = [0.1643, 0.1654, 0.1888, 0.1092, 0.1097, 0.2505, -0.0521];
 

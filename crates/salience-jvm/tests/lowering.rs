@@ -13,7 +13,7 @@ use salience_core::{Denylist, ScoreWeights, Sidecar, analyze};
 /// resulting classes, or `None` when `javac` is unavailable.
 fn compile(name: &str, source: &str) -> Option<PathBuf> {
     // Tests run in parallel in one process, so the pid alone does not make the
-    // directory unique — a counter is what keeps one test from deleting the
+    // directory unique. A counter is what keeps one test from deleting the
     // classes another is still reading.
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);

@@ -36,7 +36,7 @@ pub struct DefSite {
 /// A natural loop discovered from a back edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Loop {
-    /// The loop header — the target of the back edge, which dominates the body.
+    /// The loop header: the target of the back edge, which dominates the body.
     pub header: NodeId,
     /// Every node in the loop body, including the header.
     pub body: BTreeSet<NodeId>,
@@ -59,7 +59,7 @@ pub struct Graph {
     pub idom: Vec<Option<NodeId>>,
     /// Immediate post-dominator per node, computed over the reversed graph
     /// against a virtual exit. `None` when the node post-dominates nothing
-    /// reachable — in practice only the virtual exit itself.
+    /// reachable, in practice only the virtual exit itself.
     pub ipdom: Vec<Option<NodeId>>,
     /// For each node, the set of branch nodes it is control-dependent on.
     pub ctrl_deps: Vec<BTreeSet<NodeId>>,
@@ -74,10 +74,10 @@ pub struct Graph {
     pub defs: Vec<DefSite>,
     /// Definitions reaching the entry of each node.
     pub rd_in: Vec<BTreeSet<DefId>>,
-    /// For each node, the definitions its uses read — the def-use chain,
+    /// For each node, the definitions its uses read: the def-use chain,
     /// oriented use → def.
     pub uses_defs: Vec<BTreeSet<DefId>>,
-    /// For each definition, the nodes that read it — oriented def → use.
+    /// For each definition, the nodes that read it, oriented def → use.
     pub def_users: Vec<BTreeSet<NodeId>>,
     /// Definitions made at each node, indexed rather than searched.
     ///
@@ -89,13 +89,13 @@ pub struct Graph {
     /// of distinct dependent nodes.
     ///
     /// This is the forward dependence cone over data *and* control edges, and
-    /// it is the one genuinely continuous quantity the analysis produces: it
+    /// it is the one continuous quantity the analysis produces: it
     /// ranges over the whole width of the function rather than over a handful
     /// of buckets. A statement everything downstream reads is not the same
     /// kind of statement as one nothing reads, and no categorical tier can say
     /// so.
     pub influence: Vec<u32>,
-    /// How much of the function each node transitively depends *on* — the
+    /// How much of the function each node transitively depends *on*, the
     /// backward cone.
     ///
     /// The mirror of [`Graph::influence`], and it earns its place by breaking
@@ -255,8 +255,8 @@ pub(crate) fn dependence_successors(
 ///
 /// Computed by condensing the dependence graph into strongly connected
 /// components and unioning reachability sets in reverse topological order, so
-/// each edge is relaxed once. The naive alternative — a per-node search, or a
-/// union-to-fixpoint over the cyclic graph — is quadratic or worse, and
+/// each edge is relaxed once. The naive alternative (a per-node search, or a
+/// union-to-fixpoint over the cyclic graph) is quadratic or worse, and
 /// function bodies in real libraries reach 5,000 instructions.
 fn cone_sizes(n: usize, succ: &[Vec<NodeId>]) -> Vec<u32> {
     if n == 0 {
