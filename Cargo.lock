@@ -848,6 +848,7 @@ dependencies = [
  "salience-js",
  "salience-jvm",
  "salience-py",
+ "salience-rs",
  "serde_json",
 ]
 
@@ -886,6 +887,16 @@ dependencies = [
 
 [[package]]
 name = "salience-py"
+version = "0.1.0"
+dependencies = [
+ "salience-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "salience-rs"
 version = "0.1.0"
 dependencies = [
  "salience-core",

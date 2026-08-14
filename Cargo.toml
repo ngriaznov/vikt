@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The MIR lowerer needs nightly (rustc_public is nightly-only even to read);
+# excluding it keeps the main workspace buildable on stable forever.
+exclude = ["tools/rust-lower"]
 
 [workspace.package]
 edition = "2024"
@@ -12,6 +15,7 @@ repository = "https://github.com/ngriaznov/weightloss"
 salience-core = { path = "crates/salience-core" }
 salience-jvm = { path = "crates/salience-jvm" }
 salience-js = { path = "crates/salience-js" }
+salience-rs = { path = "crates/salience-rs" }
 salience-py = { path = "crates/salience-py" }
 
 serde = { version = "1", features = ["derive"] }

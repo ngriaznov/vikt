@@ -304,8 +304,22 @@ Implement one function: substrate → `Vec<FunctionIr>`.
 | Kotlin | same | `LineNumberTable` **plus** JSR-45 SMAP resolution | **working** |
 | Python | CPython bytecode via `dis` | PEP 626 `co_lines()`, exact | **working** |
 | JS/TS | oxc semantic-resolved AST + constructed CFG | AST spans, exact | **working** — see `salience-js` |
-| Rust | MIR via `rustc_public` | MIR spans | blocked: nightly-only |
+| Rust | MIR via `rustc_public`, through a nightly-pinned helper | MIR spans, macro expansions dropped as foreign | **working** — see below |
 | C/C++/Swift | LLVM IR `DILocation` | debug info | not attempted |
+
+Rust analysis needs one extra build step: `rustc_public` is nightly-only, so
+the MIR lowerer lives in `tools/rust-lower`, outside the stable workspace,
+with its own pinned `rust-toolchain.toml`. Build it once
+(`cd tools/rust-lower && cargo build --release`; rustup fetches the pin
+automatically) and the stable `salience` binary finds it on `PATH`, via
+`SALIENCE_RUST_LOWER`, or at its build location. The helper speaks the same
+JSON contract the Python frontend does, so the main workspace never links a
+compiler internal and stays on stable forever. Current scope: files rustc
+can compile standalone (a crate root works and pulls in its module tree;
+files with external crate dependencies need the cargo integration that is
+not built yet). MIR is analyzed after optimization, so a binding the
+compiler erased gets no span, and `println!` expands to `std::io::_print`,
+which the denylist knows.
 
 JS/TS is the one place the IR-over-AST rule bends, deliberately: there is no
 stable JavaScript bytecode to lower from, and no compiler reshapes control
@@ -328,6 +342,7 @@ salience Foo.class --stats                  # histogram and timing
 salience Foo.class --inert 'com.acme.Audit' # extend the denylist
 salience Foo.class --no-denylist            # treat nothing as inert
 salience app.ts                             # TS/JS: statement-profile panel
+salience lib.rs                             # Rust via MIR (build tools/rust-lower once)
 salience foo.py --scorer strahler           # one instrument alone
 salience foo.py --scorer current            # the incumbent alone
 salience big.py --max-instructions 0        # lift the data-table size guard

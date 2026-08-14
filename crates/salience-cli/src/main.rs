@@ -203,6 +203,10 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let lowered = salience_js::lower_file(&args.input)?;
             ("salience-js/oxc".to_owned(), lowered.functions, None)
         }
+        "rs" => {
+            let lowered = salience_rs::lower_file(&args.input)?;
+            ("salience-rs/rustc_public".to_owned(), lowered.functions, None)
+        }
         other => {
             return Err(format!(
                 "unsupported input type {other:?}: expected a .class, .py, .js or .ts file"

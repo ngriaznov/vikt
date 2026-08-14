@@ -16,6 +16,7 @@ salience-core = { workspace = true }
 salience-jvm = { workspace = true }
 salience-js = { workspace = true }
 salience-py = { workspace = true }
+salience-rs = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 

@@ -196,6 +196,11 @@ impl Denylist {
         "log.warning",
         "log.error",
         "print",
+        // Rust: what println!/eprintln! expand to, and the logging facades.
+        "std::io::_print",
+        "std::io::_eprint",
+        "log::__private_api",
+        "tracing::event",
         // JavaScript / TypeScript
         "console.log",
         "console.debug",

@@ -1,0 +1,6 @@
+# rustc_public is nightly-only even to read its data structures; this pin is
+# the entire blast radius of that fact. The stable workspace above never sees
+# it. Bump deliberately, alongside a helper rebuild and a JSON-contract test.
+[toolchain]
+channel = "nightly-2026-08-13"
+components = ["rustc-dev", "llvm-tools"]
