@@ -56,7 +56,11 @@ fn separates_a_real_accumulator_from_a_log_only_counter() {
         return;
     };
     // `subtotal += p` line 16, `inspected += 1` line 17.
-    assert_eq!(side.tier_at(16), Some("core"), "subtotal reaches the static");
+    assert_eq!(
+        side.tier_at(16),
+        Some("core"),
+        "subtotal reaches the static"
+    );
     assert_eq!(
         side.tier_at(17),
         Some("inert"),

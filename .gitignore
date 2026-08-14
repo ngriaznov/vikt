@@ -10,3 +10,4 @@ demo/kotlin/out/
 demo/**/*.jar
 corpus/
 eval/corpus-logs/
+tools/rust-lower/target/

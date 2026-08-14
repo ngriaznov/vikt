@@ -29,7 +29,6 @@ extern crate rustc_public;
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::ops::ControlFlow;
 
 use rustc_public::mir::{
     BasicBlockIdx, Body, ConstOperand, Operand, Place, Rvalue, StatementKind, TerminatorKind,
@@ -53,6 +52,9 @@ enum JKind {
     Pure,
     Branch,
     Return,
+    /// Part of the shared wire format; MIR models unwinding as edges, so
+    /// the Rust lowering never emits it.
+    #[allow(dead_code)]
     Throw,
     StateWrite { target: String },
     Call { callee: String, opacity: String },

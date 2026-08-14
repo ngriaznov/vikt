@@ -420,10 +420,7 @@ impl System {
     /// empty exclusion set) and by the brute-force verification test.
     fn solve(&self, exclude: &BTreeSet<NodeId>) -> Solved {
         let m = self.transient.len();
-        let excluded: BTreeSet<usize> = exclude
-            .iter()
-            .filter_map(|&v| self.local_of[v])
-            .collect();
+        let excluded: BTreeSet<usize> = exclude.iter().filter_map(|&v| self.local_of[v]).collect();
 
         let q_eff: Vec<Vec<(usize, f64)>> = (0..m)
             .map(|i| {
@@ -439,7 +436,13 @@ impl System {
             })
             .collect();
         let b_eff: Vec<f64> = (0..m)
-            .map(|i| if excluded.contains(&i) { 0.0 } else { self.b[i] })
+            .map(|i| {
+                if excluded.contains(&i) {
+                    0.0
+                } else {
+                    self.b[i]
+                }
+            })
             .collect();
         let mut q_pred_eff: Vec<Vec<(usize, f64)>> = vec![Vec::new(); m];
         for (i, edges) in q_eff.iter().enumerate() {
@@ -469,7 +472,13 @@ impl System {
         }
         let f: f64 = omega_score.values().copied().sum();
 
-        Solved { r, l, d, omega_score, f }
+        Solved {
+            r,
+            l,
+            d,
+            omega_score,
+            f,
+        }
     }
 }
 
@@ -750,7 +759,9 @@ mod tests {
             nodes: vec![
                 Node::pure(1).with_dataflow([1], []).with_succs([1]), // x = 0
                 Node::pure(2).with_dataflow([2], [1]).with_succs([2]), // y = x
-                Node::pure(3).with_dataflow([], [2]).with_kind(NodeKind::Return), // return y
+                Node::pure(3)
+                    .with_dataflow([], [2])
+                    .with_kind(NodeKind::Return), // return y
             ],
             entry: 0,
         };
@@ -792,7 +803,9 @@ mod tests {
                     .with_dataflow([1], [1])
                     .with_kind(NodeKind::Branch)
                     .with_succs([1, 2]), // x = x + 1; loop or exit
-                Node::pure(3).with_dataflow([], [1]).with_kind(NodeKind::Return),
+                Node::pure(3)
+                    .with_dataflow([], [1])
+                    .with_kind(NodeKind::Return),
             ],
             entry: 0,
         };
@@ -842,7 +855,9 @@ mod tests {
                 .with_dataflow([5], [5])
                 .with_kind(NodeKind::Branch)
                 .with_succs([6, 7]), // 6: e = e + 1 (loop)
-            Node::pure(7).with_dataflow([], [5]).with_kind(NodeKind::Return), // 7: return e
+            Node::pure(7)
+                .with_dataflow([], [5])
+                .with_kind(NodeKind::Return), // 7: return e
             Node {
                 line: Some(9),
                 kind: NodeKind::Call {

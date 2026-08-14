@@ -267,7 +267,10 @@ fn compute(ir: &FunctionIr, graph: &Graph) -> Fields {
     let is_output: Vec<bool> = (0..n).map(|v| ir.nodes[v].kind.is_effect()).collect();
     let (comp_of, comps) = strongly_connected(n, &succ);
     let entries = entry_set(n, &pred, &comp_of, &comps);
-    debug_assert!(!entries.is_empty(), "src must always have somewhere to seed");
+    debug_assert!(
+        !entries.is_empty(),
+        "src must always have somewhere to seed"
+    );
 
     let rho = forward_pass(&succ, &comps, &is_output);
     let rho_src = or_combine(entries.iter().map(|&e| P * rho[e]));
@@ -363,7 +366,9 @@ fn backward_pass(
 /// coincidence of Tarjan grouping a singleton with itself.
 fn sweep_count(members: &[NodeId], adj: &[Vec<NodeId>]) -> u32 {
     let set: BTreeSet<NodeId> = members.iter().copied().collect();
-    let internal = members.iter().any(|&v| adj[v].iter().any(|m| set.contains(m)));
+    let internal = members
+        .iter()
+        .any(|&v| adj[v].iter().any(|m| set.contains(m)));
     if internal { SWEEPS } else { 1 }
 }
 
@@ -619,12 +624,10 @@ mod tests {
     /// effect kind — must be scoreable too: outputs are not only `Return`.
     #[test]
     fn opaque_call_output_does_not_panic_and_is_in_range() {
-        let ir = func(vec![
-            Node::pure(1).with_kind(NodeKind::Call {
-                callee: "com.example.Service::send".into(),
-                opacity: CallOpacity::Opaque,
-            }),
-        ]);
+        let ir = func(vec![Node::pure(1).with_kind(NodeKind::Call {
+            callee: "com.example.Service::send".into(),
+            opacity: CallOpacity::Opaque,
+        })]);
         let b = birnbaum(&ir);
         assert_eq!(b.len(), 1);
         assert!((0.0..=1.0).contains(&b[0]));
@@ -667,7 +670,10 @@ mod tests {
     #[test]
     fn rescale_handles_degenerate_inputs() {
         assert_eq!(rescale_for_display(&[0.0, 0.0, 0.0]), vec![0.0, 0.0, 0.0]);
-        assert_eq!(rescale_for_display(&[0.25, 0.25, 0.25]), vec![1.0, 1.0, 1.0]);
+        assert_eq!(
+            rescale_for_display(&[0.25, 0.25, 0.25]),
+            vec![1.0, 1.0, 1.0]
+        );
         assert_eq!(rescale_for_display(&[]), Vec::<f64>::new());
     }
 

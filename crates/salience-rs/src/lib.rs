@@ -198,19 +198,15 @@ pub fn lower_crate(
     package: Option<&str>,
 ) -> Result<Vec<LoweredModule>, RsError> {
     let helper = find_helper()?;
-    let helper = helper
-        .canonicalize()
-        .map_err(RsError::Spawn)?;
+    let helper = helper.canonicalize().map_err(RsError::Spawn)?;
     let manifest = if manifest_dir.ends_with("Cargo.toml") {
         manifest_dir.to_path_buf()
     } else {
         manifest_dir.join("Cargo.toml")
     };
     let pkg_root = manifest.parent().unwrap_or(manifest_dir).to_path_buf();
-    let out_dir = std::env::temp_dir().join(format!(
-        "salience-lower-{}-{:x}",
-        std::process::id(),
-        {
+    let out_dir =
+        std::env::temp_dir().join(format!("salience-lower-{}-{:x}", std::process::id(), {
             // Cheap path hash so parallel invocations do not collide.
             let mut h: u64 = 0xcbf2_9ce4_8422_2325;
             for b in pkg_root.to_string_lossy().bytes() {
@@ -218,8 +214,7 @@ pub fn lower_crate(
                 h = h.wrapping_mul(0x0000_0100_0000_01b3);
             }
             h
-        }
-    ));
+        }));
     std::fs::create_dir_all(&out_dir)?;
     // Dependency artifacts cache here across runs. SALIENCE_TARGET_DIR
     // overrides it for callers that must not write inside the analyzed
@@ -250,9 +245,7 @@ pub fn lower_crate(
         // newer per-unit `debug/build/<package>/<hash>/fingerprint`.
         let debug = target_dir.join("debug");
         let matches_pkg = |name: &str| {
-            package.is_none_or(|p| {
-                name.starts_with(&p.replace('-', "_")) || name.starts_with(p)
-            })
+            package.is_none_or(|p| name.starts_with(&p.replace('-', "_")) || name.starts_with(p))
         };
         for base in [debug.join(".fingerprint"), debug.join("build")] {
             if let Ok(entries) = std::fs::read_dir(&base) {
@@ -335,7 +328,11 @@ fn wire_to_module(module: WireModule) -> LoweredModule {
             id: FunctionId {
                 // Per-function file: crate mode spans many source files, and
                 // the helper records each body's own.
-                file: if f.file.is_empty() { file.clone() } else { f.file },
+                file: if f.file.is_empty() {
+                    file.clone()
+                } else {
+                    f.file
+                },
                 name: f.name,
                 signature: f.signature,
                 decl_line: f.decl_line,
