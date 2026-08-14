@@ -75,6 +75,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ScorerArg::Panel)]
     scorer: ScorerArg,
 
+    /// With a cargo package as input (a directory or Cargo.toml), select one
+    /// package of the workspace, as `cargo -p` would.
+    #[arg(long, value_name = "NAME")]
+    package: Option<String>,
+
     /// Skip function bodies larger than this many instructions (0 = no limit).
     ///
     /// The analysis is quadratic in body size, and every body ever observed
@@ -166,11 +171,16 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let weights = ScoreWeights::default();
 
-    let ext = args
-        .input
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default();
+    let is_crate_input = args.input.is_dir()
+        || args.input.file_name().and_then(|f| f.to_str()) == Some("Cargo.toml");
+    let ext = if is_crate_input {
+        "rs"
+    } else {
+        args.input
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+    };
 
     let lower_started = Instant::now();
     let (generator, functions, note) = match ext {
@@ -204,8 +214,15 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             ("salience-js/oxc".to_owned(), lowered.functions, None)
         }
         "rs" => {
-            let lowered = salience_rs::lower_file(&args.input)?;
-            ("salience-rs/rustc_public".to_owned(), lowered.functions, None)
+            let functions = if is_crate_input {
+                // Whole package through cargo: every source file of the
+                // primary package, dependencies compiled but not analyzed.
+                let modules = salience_rs::lower_crate(&args.input, args.package.as_deref())?;
+                modules.into_iter().flat_map(|m| m.functions).collect()
+            } else {
+                salience_rs::lower_file(&args.input)?.functions
+            };
+            ("salience-rs/rustc_public".to_owned(), functions, None)
         }
         other => {
             return Err(format!(

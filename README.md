@@ -314,12 +314,20 @@ with its own pinned `rust-toolchain.toml`. Build it once
 automatically) and the stable `salience` binary finds it on `PATH`, via
 `SALIENCE_RUST_LOWER`, or at its build location. The helper speaks the same
 JSON contract the Python frontend does, so the main workspace never links a
-compiler internal and stays on stable forever. Current scope: files rustc
-can compile standalone (a crate root works and pulls in its module tree;
-files with external crate dependencies need the cargo integration that is
-not built yet). MIR is analyzed after optimization, so a binding the
-compiler erased gets no span, and `println!` expands to `std::io::_print`,
-which the denylist knows.
+compiler internal and stays on stable forever.
+
+Whole packages work through cargo: point `salience` at a package directory
+or `Cargo.toml` (with `--package` to pick one member of a workspace) and it
+runs `cargo check` under the pinned toolchain with the helper installed as
+`RUSTC_WRAPPER`. Dependencies, build scripts and proc-macros compile
+untouched; only the primary package is lowered. Dependency artifacts cache
+in `target/salience` under the package (`SALIENCE_TARGET_DIR` redirects
+them, for analyzing a checkout that must stay pristine), and each function
+in the sidecar carries its own source file, since a package spans many.
+Single standalone files still work without cargo. MIR is analyzed after
+optimization, so a binding the compiler erased gets no span; `println!`
+expands to `std::io::_print`, which the denylist knows; derive-macro
+bodies attribute to the `#[derive]` line, like Kotlin's property accessors.
 
 JS/TS is the one place the IR-over-AST rule bends, deliberately: there is no
 stable JavaScript bytecode to lower from, and no compiler reshapes control
@@ -343,6 +351,7 @@ salience Foo.class --inert 'com.acme.Audit' # extend the denylist
 salience Foo.class --no-denylist            # treat nothing as inert
 salience app.ts                             # TS/JS: statement-profile panel
 salience lib.rs                             # Rust via MIR (build tools/rust-lower once)
+salience path/to/package --package foo      # whole cargo package, deps compiled not analyzed
 salience foo.py --scorer strahler           # one instrument alone
 salience foo.py --scorer current            # the incumbent alone
 salience big.py --max-instructions 0        # lift the data-table size guard

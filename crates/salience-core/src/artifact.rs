@@ -87,6 +87,13 @@ pub struct TierCounts {
 /// The salience map for one function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionRecord {
+    /// Source file this function's lines refer to. Omitted when it matches
+    /// the sidecar-level `file`, which keeps single-file output (every
+    /// frontend except cargo crate mode) byte-identical to before this field
+    /// existed. Crate mode spans many files and needs per-function
+    /// attribution.
+    #[serde(skip_serializing_if = "String::is_empty", default)]
+    pub file: String,
     /// Fully-qualified name.
     pub name: String,
     /// Descriptor or signature, when the substrate has one.
@@ -142,6 +149,11 @@ impl Sidecar {
             }
         }
         self.functions.push(FunctionRecord {
+            file: if ir.id.file == self.file {
+                String::new()
+            } else {
+                ir.id.file.clone()
+            },
             name: ir.id.name.clone(),
             signature: ir.id.signature.clone(),
             decl_line: ir.id.decl_line,

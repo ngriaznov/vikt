@@ -146,7 +146,10 @@ fn line_of(span: rustc_public::ty::Span, local_file: &str) -> Option<u32> {
     u32::try_from(li.start_line).ok()
 }
 
-fn lower_body(name: &str, file: &str, local_file: &str, body: &Body) -> JFunction {
+fn lower_body(name: &str, body: &Body) -> JFunction {
+    let local_file = body.span.get_filename();
+    let file = local_file.clone();
+    let local_file = local_file.as_str();
     // First pass: assign node indices per (block, stmt-or-terminator).
     let mut index: BTreeMap<(BasicBlockIdx, usize), usize> = BTreeMap::new();
     let mut count = 0usize;
@@ -209,8 +212,11 @@ fn lower_body(name: &str, file: &str, local_file: &str, body: &Body) -> JFunctio
         });
     }
 
+    let decl_line = decl_line.or_else(|| {
+        u32::try_from(body.span.get_lines().start_line).ok()
+    });
     JFunction {
-        file: file.to_owned(),
+        file,
         name: name.to_owned(),
         signature: String::new(),
         decl_line,
@@ -342,45 +348,119 @@ fn lower_terminator(
     }
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let file = args.get(1).expect("usage: salience-rust-lower <file.rs>");
-    let edition = args
-        .iter()
-        .position(|a| a == "--edition")
-        .and_then(|i| args.get(i + 1))
-        .cloned()
-        .unwrap_or_else(|| "2021".into());
+fn lower_all() -> Vec<JFunction> {
+    let items: CrateItems = rustc_public::all_local_items();
+    let mut functions = Vec::new();
+    for item in items {
+        let Ok(body) = std::panic::catch_unwind(|| item.expect_body()) else {
+            continue;
+        };
+        let name = item.name();
+        functions.push(lower_body(&name, &body));
+    }
+    functions
+}
 
+/// Single-file mode: `salience-rust-lower <file.rs> [--edition E]`.
+fn run_single_file(file: &str, edition: &str) -> ! {
     let rustc_args = vec![
-        "rustc".into(),
-        file.clone(),
+        "rustc".to_owned(),
+        file.to_owned(),
         format!("--edition={edition}"),
         "--crate-type=lib".into(),
         "-Zno-codegen".into(),
     ];
-
-    let file_owned = file.clone();
+    let file_owned = file.to_owned();
     let result = rustc_public::run!(&rustc_args, || -> ControlFlow<(), ()> {
-        let items: CrateItems = rustc_public::all_local_items();
-        let mut functions = Vec::new();
-        for item in items {
-            let Ok(body) = std::panic::catch_unwind(|| item.expect_body()) else {
-                continue;
-            };
-            let name = item.name();
-            functions.push(lower_body(&name, &file_owned, &file_owned, &body));
-        }
         let module = JModule {
             file: file_owned.clone(),
-            functions,
+            functions: lower_all(),
         };
         let mut out = std::io::stdout().lock();
         serde_json::to_writer(&mut out, &module).expect("stdout write");
         out.flush().ok();
         ControlFlow::Continue(())
     });
-    if result.is_err() {
-        std::process::exit(1);
+    std::process::exit(i32::from(result.is_err()));
+}
+
+/// Cargo-wrapper mode. cargo invokes `$RUSTC_WRAPPER <real-rustc> <args...>`
+/// for every compilation unit. Dependencies, build scripts and proc-macros
+/// pass through to the real compiler untouched; the primary package (cargo
+/// sets CARGO_PRIMARY_PACKAGE=1 for it) is compiled through rustc_public
+/// instead, with the JSON written to $SALIENCE_LOWER_OUT/<crate>-<hash>.json.
+/// Compilation continues to completion either way, so cargo sees the
+/// artifacts it expects.
+fn run_as_wrapper(real_rustc: &str, rest: &[String]) -> ! {
+    let is_primary = std::env::var("CARGO_PRIMARY_PACKAGE").is_ok();
+    let out_dir = std::env::var("SALIENCE_LOWER_OUT").ok();
+    let crate_name = rest
+        .iter()
+        .position(|a| a == "--crate-name")
+        .and_then(|i| rest.get(i + 1))
+        .cloned()
+        .unwrap_or_default();
+    let is_build_script = crate_name.starts_with("build_script");
+    let is_proc_macro = rest
+        .windows(2)
+        .any(|w| w[0] == "--crate-type" && w[1] == "proc-macro")
+        || rest.iter().any(|a| a == "--crate-type=proc-macro");
+
+    if !(is_primary && out_dir.is_some() && !is_build_script && !is_proc_macro) {
+        let status = std::process::Command::new(real_rustc)
+            .args(rest)
+            .status()
+            .expect("spawn real rustc");
+        std::process::exit(status.code().unwrap_or(1));
     }
+    let out_dir = out_dir.expect("checked above");
+
+    let mut rustc_args = Vec::with_capacity(rest.len() + 1);
+    rustc_args.push("rustc".to_owned());
+    rustc_args.extend(rest.iter().cloned());
+
+    // Distinct units of the same crate (lib and test, say) must not clobber
+    // each other's output: suffix with a hash of the full argument list.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for a in rest {
+        for b in a.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    let out_path = format!("{out_dir}/{crate_name}-{h:016x}.json");
+
+    let result = rustc_public::run!(&rustc_args, || -> ControlFlow<(), ()> {
+        let functions = lower_all();
+        let file = functions
+            .first()
+            .map(|f| f.file.clone())
+            .unwrap_or_default();
+        let module = JModule { file, functions };
+        let json = serde_json::to_vec(&module).expect("serialize");
+        std::fs::write(&out_path, json).expect("write lowering output");
+        ControlFlow::Continue(())
+    });
+    std::process::exit(i32::from(result.is_err()));
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let first = args.get(1).cloned().unwrap_or_default();
+    // Wrapper mode is recognized by cargo handing us the real compiler as the
+    // first argument.
+    if first.ends_with("rustc") || first.ends_with("rustc.exe") {
+        run_as_wrapper(&first, &args[2..]);
+    }
+    if first.is_empty() {
+        eprintln!("usage: salience-rust-lower <file.rs> [--edition E]");
+        std::process::exit(2);
+    }
+    let edition = args
+        .iter()
+        .position(|a| a == "--edition")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "2021".into());
+    run_single_file(&first, &edition);
 }
