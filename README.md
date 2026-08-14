@@ -38,9 +38,7 @@ Every system has elements that matter more than others: keystone species in
 a food web, critical buses in a power grid, the mainstem of a river basin,
 pivotal papers in a citation network. Each of those fields (ecology, reliability
 engineering, hydrology, control theory, network science) has spent decades
-formalising *which element of this network matters*, with mathematics far more
-developed than anything software engineering has produced for the same
-question about code.
+formalising *which element of this network matters*.
 
 The founding bet of this project is that the symmetry runs deep enough to
 transplant. A function's dependence graph is a small directed network with
