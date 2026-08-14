@@ -143,7 +143,7 @@ impl PanelProfile {
 /// share a rank, and the values come from deterministic arithmetic, not
 /// accumulated error.
 #[allow(clippy::float_cmp)]
-fn rank01(vals: &[f64]) -> Vec<f64> {
+pub(crate) fn rank01(vals: &[f64]) -> Vec<f64> {
     let n = vals.len();
     if n <= 1 {
         return vec![0.5; n];

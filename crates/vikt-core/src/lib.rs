@@ -81,6 +81,7 @@
 
 pub mod artifact;
 pub mod calibration;
+pub mod filescope;
 pub mod graph;
 pub mod importance;
 pub mod ir;
@@ -94,6 +95,7 @@ pub mod trophic;
 
 pub use artifact::{Sidecar, SpanRecord};
 pub use calibration::{Verdict, spearman, verdict};
+pub use filescope::{ScopedFunction, file_scores, function_weights};
 pub use graph::Graph;
 pub use importance::{
     Denylist, FunctionImportance, LineSpan, NodeImportance, Reason, ScoreWeights, Scorer, Tier,
