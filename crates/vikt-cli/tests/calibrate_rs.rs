@@ -135,3 +135,55 @@ fn extract(stdout: &str, prefix: &str) -> f64 {
         .and_then(|v| v.parse().ok())
         .unwrap_or_else(|| panic!("missing `{prefix}` line in:\n{stdout}"))
 }
+
+/// `--lowering ast` calibrates the same fixture through the tree-sitter
+/// fallback instead of the MIR helper — no `VIKT_RUST_LOWER`, no nightly
+/// toolchain for scoring at all (the build/test commands still run on
+/// whatever stable `cargo` is on PATH, same as every other calibrate run).
+/// Mutant *generation* is unaffected: `vikt_rs::calibrate` still splices
+/// text and still needs a build to validate each mutant, so this exercises
+/// the whole pipeline, not just scoring in isolation.
+#[test]
+fn calibrates_the_rust_fixture_via_tree_sitter_without_the_helper() {
+    let before = snapshot(Path::new(FIXTURE));
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args([
+            "calibrate",
+            FIXTURE,
+            "--test-cmd",
+            "cargo test --quiet",
+            "--sample",
+            "4",
+            "--budget",
+            "16",
+            "--timeout-secs",
+            "240",
+            "--scope",
+            "function",
+            "--lowering",
+            "ast",
+        ])
+        .env_remove("VIKT_RUST_LOWER")
+        .output()
+        .expect("running the vikt binary");
+    let after = snapshot(Path::new(FIXTURE));
+    assert_eq!(
+        before, after,
+        "calibrate must leave the input tree byte-identical"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "vikt failed: {}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        out.status
+    );
+    assert!(
+        stdout.contains("scored via vikt-ts/tree-sitter-rust (statement profile)"),
+        "the run must say which lowering scored it:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("verdict:"),
+        "a verdict must still be rendered:\n{stdout}"
+    );
+}

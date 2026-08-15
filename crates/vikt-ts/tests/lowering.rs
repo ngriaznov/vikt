@@ -566,29 +566,407 @@ fn a_mostly_broken_file_fails_loudly() {
 }
 
 #[test]
-fn java_and_kotlin_are_not_yet_implemented() {
-    let err = lower_source(Language::Java, "class X {}", "X.java")
-        .expect_err("java table not wired up yet");
-    assert!(matches!(
-        err,
-        vikt_ts::TsError::NotYetImplemented {
-            language: Language::Java
-        }
-    ));
-    let err = lower_source(Language::Kotlin, "fun x() {}", "x.kt")
-        .expect_err("kotlin table not wired up yet");
-    assert!(matches!(
-        err,
-        vikt_ts::TsError::NotYetImplemented {
-            language: Language::Kotlin
-        }
-    ));
-}
-
-#[test]
 fn generator_string_identifies_the_grammar() {
     let module = lower_source(Language::Rust, "fn f() {}", "f.rs").expect("lowers");
     assert_eq!(module.generator, "vikt-ts/tree-sitter-rust");
     let module = lower_source(Language::Python, "def f(): pass", "f.py").expect("lowers");
     assert_eq!(module.generator, "vikt-ts/tree-sitter-python");
+    let module = lower_source(Language::Java, "class X {}", "X.java").expect("lowers");
+    assert_eq!(module.generator, "vikt-ts/tree-sitter-java");
+    let module = lower_source(Language::Kotlin, "fun f() {}", "f.kt").expect("lowers");
+    assert_eq!(module.generator, "vikt-ts/tree-sitter-kotlin");
+}
+
+// ---------------------------------------------------------------- Java ----
+
+const JAVA_METHOD_NAMING: &str = r"
+class Box {
+    int value;
+    int get() {
+        return value;
+    }
+    void bump(int delta) {
+        value = value + delta;
+    }
+}
+";
+
+#[test]
+fn java_methods_are_named_type_colon_colon_method() {
+    let module = lower_source(Language::Java, JAVA_METHOD_NAMING, "Box.java").expect("lowers");
+    assert!(
+        module.functions.iter().any(|f| f.id.name == "Box::get"),
+        "found: {:?}",
+        module
+            .functions
+            .iter()
+            .map(|f| &f.id.name)
+            .collect::<Vec<_>>()
+    );
+    assert!(module.functions.iter().any(|f| f.id.name == "Box::bump"));
+}
+
+const JAVA_MULTI_DECLARATOR: &str = r"
+class Pair {
+    int sum() {
+        int a = 1, b = 2;
+        return a + b;
+    }
+}
+";
+
+#[test]
+fn java_multi_declarator_binds_one_node_per_declarator() {
+    let module = lower_source(Language::Java, JAVA_MULTI_DECLARATOR, "Pair.java").expect("lowers");
+    let f = function(&module, "Pair::sum");
+    f.validate().expect("valid graph");
+
+    let a = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("a = 1"))
+        .expect("a's own declarator node");
+    let b = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("b = 2"))
+        .expect("b's own declarator node");
+    assert_eq!(a.defs.len(), 1);
+    assert_eq!(b.defs.len(), 1);
+    assert_ne!(a.defs[0], b.defs[0]);
+
+    let sum = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "return a + b;")
+        .expect("return a + b");
+    assert!(sum.uses.contains(&a.defs[0]));
+    assert!(sum.uses.contains(&b.defs[0]));
+}
+
+const JAVA_LOOP: &str = r"
+class Summer {
+    int sumPositive(int[] xs) {
+        int total = 0;
+        for (int x : xs) {
+            if (x < 0) {
+                continue;
+            }
+            total += x;
+        }
+        return total;
+    }
+}
+";
+
+#[test]
+fn java_enhanced_for_has_loop_carried_defs_and_a_back_edge() {
+    let module = lower_source(Language::Java, JAVA_LOOP, "Summer.java").expect("lowers");
+    let f = function(&module, "Summer::sumPositive");
+    f.validate().expect("valid graph");
+
+    let (branch_id, branch) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("for (int x"))
+        .expect("the enhanced-for's iterator-advance Branch node");
+    assert!(
+        !branch.defs.is_empty(),
+        "the loop variable `x` must be a def"
+    );
+
+    let body = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("total += x"))
+        .expect("loop body statement");
+    assert!(
+        body.succs.contains(&branch_id),
+        "the loop body must edge back to the Branch node"
+    );
+
+    let cont = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("continue"))
+        .expect("the continue node");
+    assert!(
+        cont.succs.contains(&branch_id),
+        "continue must edge to the loop's Branch node, not fall through to total += x"
+    );
+}
+
+const JAVA_CALLS: &str = r"
+class Calc {
+    int compute(int x) {
+        int doubled = scale(x);
+        Builder obj = Builder.make();
+        return obj.build(doubled);
+    }
+}
+";
+
+#[test]
+fn java_extracts_free_static_and_method_call_targets() {
+    let module = lower_source(Language::Java, JAVA_CALLS, "Calc.java").expect("lowers");
+    let f = function(&module, "Calc::compute");
+    f.validate().expect("valid graph");
+
+    let names = callees(f);
+    assert!(names.contains(&"scale"), "free call target: {names:?}");
+    assert!(
+        names.contains(&"Builder.make"),
+        "static call target with receiver: {names:?}"
+    );
+    assert!(
+        names.contains(&"obj.build"),
+        "method call target with receiver: {names:?}"
+    );
+}
+
+const JAVA_STATE_WRITE: &str = r"
+class Counter {
+    void bump(Counter counter) {
+        counter.value = counter.value + 1;
+    }
+}
+";
+
+#[test]
+fn java_field_assignment_is_a_state_write() {
+    let module = lower_source(Language::Java, JAVA_STATE_WRITE, "Counter.java").expect("lowers");
+    let f = function(&module, "Counter::bump");
+    f.validate().expect("valid graph");
+
+    let write = f
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::StateWrite { .. }))
+        .expect("a StateWrite node for the field assignment");
+    let NodeKind::StateWrite { target } = &write.kind else {
+        unreachable!()
+    };
+    assert_eq!(target, "counter.value");
+    assert!(write.kind.is_effect());
+}
+
+const JAVA_EARLY_EXIT: &str = r"
+class Finder {
+    int firstEven(int n) {
+        int i = 0;
+        while (i < n) {
+            if (i % 2 == 0) {
+                return i;
+            }
+            i += 1;
+        }
+        return -1;
+    }
+}
+";
+
+#[test]
+fn java_return_inside_branch_has_no_successors() {
+    let module = lower_source(Language::Java, JAVA_EARLY_EXIT, "Finder.java").expect("lowers");
+    let f = function(&module, "Finder::firstEven");
+    f.validate().expect("valid graph");
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(returns.len(), 2);
+    assert!(returns.iter().all(|n| n.succs.is_empty()));
+}
+
+#[test]
+fn java_lowering_is_deterministic() {
+    let a = lower_source(Language::Java, JAVA_LOOP, "Summer.java").expect("lowers");
+    let b = lower_source(Language::Java, JAVA_LOOP, "Summer.java").expect("lowers");
+    for (fa, fb) in a.functions.iter().zip(b.functions.iter()) {
+        assert_eq!(fa.nodes.len(), fb.nodes.len());
+        for (na, nb) in fa.nodes.iter().zip(fb.nodes.iter()) {
+            assert_eq!(na.defs, nb.defs);
+            assert_eq!(na.uses, nb.uses);
+            assert_eq!(na.succs, nb.succs);
+        }
+    }
+}
+
+// -------------------------------------------------------------- Kotlin ----
+
+const KOTLIN_METHOD_NAMING: &str = "
+class Box {
+    var value: Int = 0
+    fun bump(delta: Int) {
+        value = value + delta
+    }
+}
+";
+
+#[test]
+fn kotlin_methods_are_named_type_colon_colon_method() {
+    let module = lower_source(Language::Kotlin, KOTLIN_METHOD_NAMING, "Box.kt").expect("lowers");
+    assert!(
+        module.functions.iter().any(|f| f.id.name == "Box::bump"),
+        "found: {:?}",
+        module
+            .functions
+            .iter()
+            .map(|f| &f.id.name)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn kotlin_class_field_belongs_to_the_module_wrapper() {
+    let module = lower_source(Language::Kotlin, KOTLIN_METHOD_NAMING, "Box.kt").expect("lowers");
+    let m = function(&module, "<module>");
+    assert!(
+        m.nodes.iter().any(|n| n.label.starts_with("var value")),
+        "the class field's initializer must be lowered as a <module> statement: {:?}",
+        m.nodes.iter().map(|n| &n.label).collect::<Vec<_>>()
+    );
+}
+
+const KOTLIN_LOOP: &str = "
+class Summer {
+    fun sumPositive(xs: List<Int>): Int {
+        var total = 0
+        for (x in xs) {
+            if (x < 0) continue
+            total += x
+        }
+        return total
+    }
+}
+";
+
+#[test]
+fn kotlin_for_loop_has_loop_carried_defs_and_bare_continue_reaches_the_branch() {
+    let module = lower_source(Language::Kotlin, KOTLIN_LOOP, "Summer.kt").expect("lowers");
+    let f = function(&module, "Summer::sumPositive");
+    f.validate().expect("valid graph");
+
+    let (branch_id, branch) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("for (x in"))
+        .expect("the for-loop's iterator-advance Branch node");
+    assert!(
+        !branch.defs.is_empty(),
+        "the loop variable `x` must be a def"
+    );
+
+    let body = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("total += x"))
+        .expect("loop body statement");
+    assert!(body.succs.contains(&branch_id));
+
+    // Kotlin's grammar tokenizes a bare `continue` as a plain `identifier`,
+    // not a dedicated node kind - this is the one behavior the whole test
+    // exists to pin down (see `GrammarTable::continue_texts`).
+    let cont = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "continue")
+        .expect("the continue node, lowered from what parses as a bare identifier");
+    assert!(
+        cont.succs.contains(&branch_id),
+        "continue must edge to the loop's Branch node, not fall through to total += x"
+    );
+}
+
+const KOTLIN_CALLS: &str = "
+class Calc {
+    fun compute(x: Int): Int {
+        val doubled = scale(x)
+        val obj = Builder()
+        return obj.build(doubled)
+    }
+}
+";
+
+#[test]
+fn kotlin_extracts_free_constructor_and_method_call_targets() {
+    let module = lower_source(Language::Kotlin, KOTLIN_CALLS, "Calc.kt").expect("lowers");
+    let f = function(&module, "Calc::compute");
+    f.validate().expect("valid graph");
+
+    let names = callees(f);
+    assert!(names.contains(&"scale"), "free call target: {names:?}");
+    assert!(
+        names.contains(&"Builder"),
+        "constructor-style call target: {names:?}"
+    );
+    assert!(
+        names.contains(&"obj.build"),
+        "method call target with receiver: {names:?}"
+    );
+}
+
+const KOTLIN_STATE_WRITE: &str = "
+class Counter {
+    fun bump(counter: Counter) {
+        counter.value = counter.value + 1
+    }
+}
+";
+
+#[test]
+fn kotlin_property_assignment_is_a_state_write() {
+    let module = lower_source(Language::Kotlin, KOTLIN_STATE_WRITE, "Counter.kt").expect("lowers");
+    let f = function(&module, "Counter::bump");
+    f.validate().expect("valid graph");
+
+    let write = f
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::StateWrite { .. }))
+        .expect("a StateWrite node for the property assignment");
+    let NodeKind::StateWrite { target } = &write.kind else {
+        unreachable!()
+    };
+    assert_eq!(target, "counter.value");
+    assert!(write.kind.is_effect());
+}
+
+const KOTLIN_EXPR_BODY: &str = "
+class RateTable {
+    fun rateFor(x: Int): Double = compute(x)
+}
+";
+
+#[test]
+fn kotlin_expression_body_lowers_to_a_real_return_node() {
+    let module = lower_source(Language::Kotlin, KOTLIN_EXPR_BODY, "RateTable.kt").expect("lowers");
+    let f = function(&module, "RateTable::rateFor");
+    f.validate().expect("valid graph");
+
+    let ret = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("expression body must still produce a Return node");
+    assert!(ret.succs.is_empty());
+    assert!(callees(f).contains(&"compute"));
+}
+
+#[test]
+fn kotlin_lowering_is_deterministic() {
+    let a = lower_source(Language::Kotlin, KOTLIN_LOOP, "Summer.kt").expect("lowers");
+    let b = lower_source(Language::Kotlin, KOTLIN_LOOP, "Summer.kt").expect("lowers");
+    for (fa, fb) in a.functions.iter().zip(b.functions.iter()) {
+        assert_eq!(fa.nodes.len(), fb.nodes.len());
+        for (na, nb) in fa.nodes.iter().zip(fb.nodes.iter()) {
+            assert_eq!(na.defs, nb.defs);
+            assert_eq!(na.uses, nb.uses);
+            assert_eq!(na.succs, nb.succs);
+        }
+    }
 }
