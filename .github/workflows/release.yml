@@ -73,10 +73,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS runners are arm64, so the x86_64 build is a cross-compile.
-          # Both work without extra tooling: the crate tree is pure Rust
-          # (no cc, no bindgen), so there is no C toolchain to arrange
-          # per target.
+          # vikt-ts's tree-sitter grammars compile C sources via the `cc`
+          # crate at build time, so cross targets need a C cross-compiler in
+          # addition to whatever links the final binary (matrix.linker).
+          # Native builds (host arch == target arch) need neither: `cc`
+          # finds the ambient compiler (Xcode clang, apt gcc, cl.exe) on its
+          # own. Only the two cases below where target != host arch need an
+          # explicit matrix.cc, wired into CC_<target> in the build step.
+          #
+          # macOS runners are arm64, so the x86_64 build is a cross-compile,
+          # but Xcode's clang is a universal cross-compiler by default and
+          # needs no extra CC_<target> pointer.
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-apple-darwin
@@ -84,14 +91,18 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           # A statically linked Linux binary, for CI images and containers
-          # that should not care about the host's glibc.
+          # that should not care about the host's glibc. musl-tools
+          # installs musl-gcc, but `cc` only picks it up over the host gcc
+          # when pointed at it explicitly via CC_<target>.
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             packages: musl-tools
+            cc: musl-gcc
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             packages: gcc-aarch64-linux-gnu
             linker: aarch64-linux-gnu-gcc
+            cc: aarch64-linux-gnu-gcc
           - target: x86_64-pc-windows-msvc
             os: windows-latest
 
@@ -114,8 +125,15 @@ jobs:
         shell: bash
         run: |
           if [ -n "${{ matrix.linker }}" ]; then
+            # cargo's own env convention: target triple uppercased.
             target_upper=$(echo "${{ matrix.target }}" | tr 'a-z-' 'A-Z_')
             export "CARGO_TARGET_${target_upper}_LINKER=${{ matrix.linker }}"
+          fi
+          if [ -n "${{ matrix.cc }}" ]; then
+            # the `cc` crate's own env convention: target triple stays
+            # lowercase, only '-' becomes '_'. Do not uppercase this one.
+            target_lower=$(echo "${{ matrix.target }}" | tr '-' '_')
+            export "CC_${target_lower}=${{ matrix.cc }}"
           fi
           cargo build --release --locked -p vikt-cli --target ${{ matrix.target }}
 
