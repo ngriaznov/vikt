@@ -17,6 +17,7 @@ vikt-jvm = { path = "crates/vikt-jvm" }
 vikt-js = { path = "crates/vikt-js" }
 vikt-rs = { path = "crates/vikt-rs" }
 vikt-py = { path = "crates/vikt-py" }
+vikt-ts = { path = "crates/vikt-ts" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

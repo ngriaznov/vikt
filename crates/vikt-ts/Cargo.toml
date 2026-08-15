@@ -1,0 +1,18 @@
+[package]
+name = "vikt-ts"
+version = "0.1.0"
+description = "Generic tree-sitter fallback frontend for vikt-core: one statement-granular walker driven by a per-language grammar table."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vikt-core = { workspace = true }
+thiserror = { workspace = true }
+tree-sitter = "=0.26.12"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-python = "=0.25.0"
+
+[lints]
+workspace = true
