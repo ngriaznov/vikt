@@ -28,8 +28,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
-use std::os::unix::fs::symlink;
-use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
@@ -181,8 +179,8 @@ pub struct CalibrateArgs {
     /// ever sees the command's exit code.
     pub path: PathBuf,
 
-    /// Command that runs the project's tests, executed with `sh -c` from the
-    /// root of a temporary copy of the tree. Must pass on the unmutated
+    /// Command that runs the project's tests, executed with `sh -c` (`cmd
+    /// /C` on Windows) from the root of a temporary copy of the tree. Must pass on the unmutated
     /// tree. For Python, typically a `python3 -m unittest`/`pytest`
     /// invocation; for JavaScript/TypeScript, typically `node --test` or
     /// `npm test`.
@@ -1360,7 +1358,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
         if ty.is_dir() {
             copy_dir_all(&entry.path(), &target)?;
         } else if ty.is_symlink() {
-            symlink(std::fs::read_link(entry.path())?, &target)?;
+            clone_symlink(&entry.path(), &target)?;
         } else {
             std::fs::copy(entry.path(), &target)?;
         }
@@ -1414,14 +1412,11 @@ fn is_test_path(rel: &Path, lang: Language) -> bool {
 /// or forking command would leave the suite's grandchildren running against
 /// the shared copy while later mutants are swapped in under them.
 fn run_test(cmd: &str, dir: &Path, timeout: Duration) -> std::io::Result<TestOutcome> {
-    let mut child = Command::new("sh")
-        .args(["-c", cmd])
-        .current_dir(dir)
+    let mut child = shell(cmd, dir)
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .process_group(0)
         .spawn()?;
     let started = Instant::now();
     loop {
@@ -1442,16 +1437,62 @@ fn run_test(cmd: &str, dir: &Path, timeout: Duration) -> std::io::Result<TestOut
     }
 }
 
-/// SIGKILLs the process group led by `pid`. Signalling a group takes a
-/// negative pid, which `Child::kill` cannot express and the workspace's
-/// `unsafe_code = "deny"` keeps libc from providing, so the signal goes
-/// through the shell's own `kill` — the run already depends on `sh`. The
-/// caller still kills and reaps the direct child, which covers the window
-/// where the shell exited before it could be signalled.
+/// The platform shell, leading its own process group where the platform
+/// has one so [`kill_group`] can end the whole suite, not just the wrapper.
+#[cfg(unix)]
+fn shell(cmd: &str, dir: &Path) -> Command {
+    use std::os::unix::process::CommandExt as _;
+    let mut c = Command::new("sh");
+    c.args(["-c", cmd]).current_dir(dir).process_group(0);
+    c
+}
+
+#[cfg(windows)]
+fn shell(cmd: &str, dir: &Path) -> Command {
+    let mut c = Command::new("cmd");
+    c.args(["/C", cmd]).current_dir(dir);
+    c
+}
+
+/// Recreates a symlink found inside `node_modules`. Windows restricts
+/// symlink creation to elevated or developer-mode sessions, so there the
+/// link's target is copied instead — correctness over fidelity.
+#[cfg(unix)]
+fn clone_symlink(link: &Path, target: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(std::fs::read_link(link)?, target)
+}
+
+#[cfg(windows)]
+fn clone_symlink(link: &Path, target: &Path) -> std::io::Result<()> {
+    if std::fs::metadata(link)?.is_dir() {
+        copy_dir_all(link, target)
+    } else {
+        std::fs::copy(link, target).map(|_| ())
+    }
+}
+
+/// Kills the whole process tree the test command spawned. Signalling a
+/// Unix group takes a negative pid, which `Child::kill` cannot express and
+/// the workspace's `unsafe_code = "deny"` keeps libc from providing, so
+/// the signal goes through the shell's own `kill` — the run already
+/// depends on `sh`. Windows has a first-class tree kill in `taskkill`.
+/// The caller still kills and reaps the direct child either way, covering
+/// the window where the wrapper exited before it could be signalled.
+#[cfg(unix)]
 fn kill_group(pid: u32) {
     let _ = Command::new("sh")
         .arg("-c")
         .arg(format!("kill -s KILL -- -{pid}"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(windows)]
+fn kill_group(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
