@@ -36,12 +36,12 @@ use clap::ValueEnum;
 use vikt_core::calibration::{
     MIN_EXECUTED_MUTANTS, MIN_SCORED_LINES, NULL_MARGIN, RHO_FLOOR, Verdict, spearman, verdict,
 };
-use vikt_core::mutant::MutantSet;
 use vikt_core::{
     Denylist, FunctionFeatures, FunctionImportance, FunctionIr, PanelProfile, ScopedFunction,
     ScoreWeights, Scorer, analyze, analyze_with_scorer, project_to_lines,
 };
 
+use crate::language::{self, Language};
 use crate::lowering::{self, Lowering};
 
 /// Body-size ceiling, matching the analyze path's `--max-instructions`
@@ -61,95 +61,12 @@ const MAX_COPY_BYTES: u64 = 8 * 1024 * 1024;
 /// for a JavaScript suite to run, but never as scored or mutated source.
 const SKIP_DIRS: &[&str] = &["__pycache__", "target", "venv"];
 
-/// Extensions Python sources carry.
-const PY_EXT: &[&str] = &["py"];
-
-/// Extensions JavaScript/TypeScript sources carry.
-const JS_EXT: &[&str] = &["js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx"];
-
-/// The JS_EXT subset that is TypeScript rather than plain JavaScript — the
-/// subset the type-check caveat in the module docs applies to.
-const TS_EXT: &[&str] = &["ts", "mts", "cts", "tsx"];
-
-/// Extensions Rust sources carry. A tree qualifies as Rust by its
-/// `Cargo.toml`, not by these — mutants need a test suite, and a bare `.rs`
-/// file has no way to run one — but the scan still collects them so the
-/// error for a package-less Rust tree can say what it saw.
-const RS_EXT: &[&str] = &["rs"];
-
-/// Extensions that mark a tree as belonging to a frontend calibrate does not
-/// support at all, for an honest "not supported" error instead of a puzzling
-/// "no sources found".
-const OTHER_FRONTENDS: &[&str] = &["class", "java", "kt"];
-
-/// Which lowering-and-mutation engine handles a tree, chosen once in `run`
-/// from what [`scan_tree`] found and threaded through every stage that needs
-/// to know.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Language {
-    Python,
-    JavaScript,
-    Rust,
-}
-
-impl Language {
-    /// How the language reads in a sentence, for progress and error text.
-    fn label(self) -> &'static str {
-        match self {
-            Self::Python => "Python",
-            Self::JavaScript => "JavaScript/TypeScript",
-            Self::Rust => "Rust",
-        }
-    }
-
-    /// The dataset's `language` value: one lowercase word, stable across
-    /// releases because refit tooling keys on it.
-    fn slug(self) -> &'static str {
-        match self {
-            Self::Python => "python",
-            Self::JavaScript => "javascript",
-            Self::Rust => "rust",
-        }
-    }
-
-    /// Which panel weight vector fits the frontend's dependence-graph
-    /// granularity — instruction-level for bytecode, statement-level for
-    /// the oxc-lowered AST. Mirrors `profile_for_ext` in `main.rs`.
-    fn panel_profile(self) -> PanelProfile {
-        match self {
-            Self::Python | Self::Rust => PanelProfile::Instruction,
-            Self::JavaScript => PanelProfile::Statement,
-        }
-    }
-
-    /// The synthetic function name(s) that overlap the extent of a real
-    /// `def`/function and would double-count lines if sampled. `<module>`
-    /// is checked first and unconditionally: every frontend that has one
-    /// (Python's bytecode compiler, `vikt_js::lower_source`, and this
-    /// crate's own tree-sitter fallback for Python/Rust - see
-    /// `vikt_ts::LoweredModule`) uses exactly that name for the synthetic
-    /// top-level wrapper, regardless of which lowering actually produced
-    /// it. Beyond that: Python's bytecode compiler also synthesizes a code
-    /// object — `<lambda>`, `<listcomp>` and friends — for constructs that
-    /// are not their own top-level definition; excluding anything with `<`
-    /// in its name catches the rest at once. Every other JS function —
-    /// named or anonymous — is a real function whose lines are its own,
-    /// most often an arrow function assigned to a name; excluding it the
-    /// way Python excludes lambdas would silently drop most JS code from
-    /// calibration.
-    fn is_synthetic(self, name: &str) -> bool {
-        if name == "<module>" {
-            return true;
-        }
-        match self {
-            Self::Python => name.contains('<'),
-            Self::JavaScript => false,
-            // MIR bodies for closures, generators and inline consts carry
-            // brace-qualified names (`f::{closure#0}`) and overlap their
-            // parent function's extent the way Python lambdas do.
-            Self::Rust => name.contains('{'),
-        }
-    }
+/// Extensions calibrate cannot mutate — analyzable inputs without a
+/// mutation engine — for an honest "not supported" error instead of a
+/// puzzling "no sources found". Derived from the registry's tables so the
+/// two can never disagree about what exists.
+fn uncalibratable(ext: &str) -> bool {
+    language::ext::CLASS.contains(&ext) || language::ext::JVM_SOURCE.contains(&ext)
 }
 
 /// How wide a lens the panel score and positional null use when paired
@@ -370,7 +287,14 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     );
 
-    let budget = args.budget.unwrap_or(if rust { 60 } else { 150 });
+    let budget = args.budget.unwrap_or_else(|| {
+        if rust {
+            Language::Rust
+        } else {
+            Language::Python
+        }
+        .budget_default()
+    });
     let timeout = Duration::from_secs(args.timeout_secs);
     if rust {
         println!(
@@ -426,7 +350,7 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     );
 
-    if lang == Language::JavaScript && scored.iter().any(|f| is_typescript(&f.file)) {
+    if lang == Language::JavaScript && scored.iter().any(|f| language::is_typescript(&f.file)) {
         println!(
             "calibrate: TypeScript sources among the scored files — a mutant that fails the \
 repository's own type check is read as killed, indistinguishable from one an actual test caught"
@@ -517,14 +441,6 @@ repository's own type check is read as killed, indistinguishable from one an act
     } else {
         ExitCode::SUCCESS
     })
-}
-
-/// True for `.ts`/`.mts`/`.cts`/`.tsx` — the extensions the type-check
-/// caveat applies to.
-fn is_typescript(rel: &Path) -> bool {
-    rel.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|ext| TS_EXT.contains(&ext))
 }
 
 /// Exit status under `--gate`, as documented on the flag. A number rather
@@ -623,7 +539,7 @@ fn score_tree(
     };
     let mut scored = Vec::new();
     let mut file_scores = FileScores::new();
-    for rel in files.iter().filter(|p| !is_test_path(p, lang)) {
+    for rel in files.iter().filter(|p| !lang.is_test_path(p)) {
         let functions = match (lang, via_ts) {
             (Language::Python, true) => match vikt_ts::lower_file(&root.join(rel)) {
                 Ok(l) => l.functions,
@@ -683,7 +599,7 @@ fn score_crate(root: &Path, lowering_arg: Lowering) -> Result<ScoreOutcome, Box<
     for (rel, functions) in by_file {
         // An absolute path that did not strip is outside the copy entirely:
         // a dependency's sources, or the sysroot. Not ours to mutate.
-        if rel.is_absolute() || is_test_path(&rel, Language::Rust) {
+        if rel.is_absolute() || Language::Rust.is_test_path(&rel) {
             continue;
         }
         score_functions(
@@ -859,15 +775,7 @@ fn generate_mutants(
             .collect();
         spans.sort_unstable();
         let remaining = budget - mutants.len();
-        let set: MutantSet = match lang {
-            Language::Python => {
-                vikt_py::calibrate::mutants_for(&root.join(file), &spans, remaining, &args.python)?
-            }
-            Language::JavaScript => {
-                vikt_js::calibrate::mutants_for(&root.join(file), &spans, remaining)?
-            }
-            Language::Rust => vikt_rs::calibrate::mutants_for(&root.join(file), &spans, remaining)?,
-        };
+        let set = lang.mutants_for(&root.join(file), &spans, remaining, &args.python)?;
         candidates += set.total_sites;
         invalid_discarded += set.invalid_discarded;
         mutants.extend(set.mutants.into_iter().map(|m| (file.clone(), m)));
@@ -920,7 +828,7 @@ fn execute_mutants(
         // mutant, not a kill — and a build that hangs is treated the same
         // way, since nothing behavioural was ever measured. The copy's
         // target dir persists across mutants, so each build is incremental.
-        if lang == Language::Rust {
+        if lang.needs_build_step() {
             let build = run_test(&args.build_cmd, root, timeout);
             match build {
                 Ok(TestOutcome::Pass) => {}
@@ -1376,18 +1284,18 @@ fn walk(
                 scan.skipped_large += 1;
                 continue;
             }
-            if OTHER_FRONTENDS.contains(&ext) {
+            if uncalibratable(ext) {
                 scan.other_frontend = true;
             }
             let rel = path
                 .strip_prefix(root)
                 .expect("invariant: the walk never leaves the root")
                 .to_path_buf();
-            if PY_EXT.contains(&ext) {
+            if Language::Python.extensions().contains(&ext) {
                 scan.py.push(rel.clone());
-            } else if JS_EXT.contains(&ext) {
+            } else if Language::JavaScript.extensions().contains(&ext) {
                 scan.js.push(rel.clone());
-            } else if RS_EXT.contains(&ext) {
+            } else if Language::Rust.extensions().contains(&ext) {
                 scan.rs.push(rel.clone());
             }
             scan.files.push(rel);
@@ -1460,39 +1368,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-/// True for files that are part of the test suite rather than the code under
-/// test. Shared across languages: `test`/`tests` directories, and (for
-/// JavaScript/TypeScript only) `__tests__`. Filename suffixes are
-/// per-language convention: `test_*.py`/`*_test.py` for Python,
-/// `*.test.<ext>`/`*.spec.<ext>` for JavaScript/TypeScript.
-// The `.test`/`.spec` suffix check below is deliberately case-sensitive —
-// it is a filename convention, not a file-extension check — so clippy's
-// file-extension heuristic does not apply here.
-#[allow(clippy::case_sensitive_file_extension_comparisons)]
-fn is_test_path(rel: &Path, lang: Language) -> bool {
-    let in_test_dir = rel.parent().is_some_and(|p| {
-        p.components().any(|c| {
-            let name = c.as_os_str().to_str();
-            matches!(name, Some("test" | "tests"))
-                || (lang == Language::JavaScript && name == Some("__tests__"))
-                || (lang == Language::Rust && matches!(name, Some("benches" | "examples")))
-        })
-    });
-    let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    let by_name = match lang {
-        Language::Python => name.starts_with("test_") || name.ends_with("_test.py"),
-        Language::JavaScript => JS_EXT.iter().any(|ext| {
-            name.strip_suffix(&format!(".{ext}"))
-                .is_some_and(|base| base.ends_with(".test") || base.ends_with(".spec"))
-        }),
-        // Rust unit tests live inside source files behind #[cfg(test)],
-        // which `cargo check` never lowers — path rules only need to cover
-        // the conventional integration/bench/example directories above.
-        Language::Rust => false,
-    };
-    in_test_dir || by_name
 }
 
 /// Runs the test command with a hard wall-clock limit.
@@ -1617,36 +1492,21 @@ mod tests {
     /// must never start matching Python paths.
     #[test]
     fn python_test_path_rule_is_unchanged() {
-        assert!(is_test_path(
-            Path::new("pkg/tests/test_foo.py"),
-            Language::Python
-        ));
-        assert!(is_test_path(Path::new("test_foo.py"), Language::Python));
-        assert!(is_test_path(Path::new("foo_test.py"), Language::Python));
-        assert!(!is_test_path(
-            Path::new("pkg/__tests__/foo.py"),
-            Language::Python
-        ));
-        assert!(!is_test_path(Path::new("foo.spec.py"), Language::Python));
-        assert!(!is_test_path(Path::new("pkg/foo.py"), Language::Python));
+        assert!(Language::Python.is_test_path(Path::new("pkg/tests/test_foo.py")));
+        assert!(Language::Python.is_test_path(Path::new("test_foo.py")));
+        assert!(Language::Python.is_test_path(Path::new("foo_test.py")));
+        assert!(!Language::Python.is_test_path(Path::new("pkg/__tests__/foo.py")));
+        assert!(!Language::Python.is_test_path(Path::new("foo.spec.py")));
+        assert!(!Language::Python.is_test_path(Path::new("pkg/foo.py")));
     }
 
     #[test]
     fn javascript_test_path_conventions() {
-        assert!(is_test_path(
-            Path::new("pkg/tests/foo.js"),
-            Language::JavaScript
-        ));
-        assert!(is_test_path(
-            Path::new("pkg/__tests__/foo.js"),
-            Language::JavaScript
-        ));
-        assert!(is_test_path(Path::new("foo.test.ts"), Language::JavaScript));
-        assert!(is_test_path(
-            Path::new("foo.spec.tsx"),
-            Language::JavaScript
-        ));
-        assert!(!is_test_path(Path::new("pkg/foo.js"), Language::JavaScript));
+        assert!(Language::JavaScript.is_test_path(Path::new("pkg/tests/foo.js")));
+        assert!(Language::JavaScript.is_test_path(Path::new("pkg/__tests__/foo.js")));
+        assert!(Language::JavaScript.is_test_path(Path::new("foo.test.ts")));
+        assert!(Language::JavaScript.is_test_path(Path::new("foo.spec.tsx")));
+        assert!(!Language::JavaScript.is_test_path(Path::new("pkg/foo.js")));
     }
 
     #[test]
