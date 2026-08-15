@@ -215,7 +215,9 @@ pub(crate) fn lower_module(
     let mut module = FnCtx::new(table, source, file, "<module>", 1);
     module.lower_params(None);
     let _ = module.lower_block_children(root, vec![0]);
-    functions.push(module.finish());
+    let (module_ir, module_diags) = module.finish();
+    functions.push(module_ir);
+    diagnostics.extend(module_diags);
 
     for fnode in fn_nodes {
         let bare_name = fnode
@@ -270,7 +272,9 @@ pub(crate) fn lower_module(
                 lowerer.link(&[0], entry);
             }
         }
-        functions.push(lowerer.finish());
+        let (fn_ir, fn_diags) = lowerer.finish();
+        functions.push(fn_ir);
+        diagnostics.extend(fn_diags);
     }
 
     (functions, diagnostics)
@@ -437,6 +441,12 @@ struct FnCtx<'t> {
     globals: BTreeMap<String, VarId>,
     next_var: VarId,
     loops: Vec<LoopCtx>,
+    /// Statement-level parse-error reports - see the `has_error` check at
+    /// the top of `lower_stmt`. Distinct from `lower_module`'s whole-function
+    /// `has_error` stubbing: that check guards every node reachable from a
+    /// collected function, so these only ever fire for `<module>`-scope
+    /// statements, which have no such guard.
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl<'t> FnCtx<'t> {
@@ -458,12 +468,20 @@ impl<'t> FnCtx<'t> {
             globals: BTreeMap::new(),
             next_var: 0,
             loops: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
     fn push(&mut self, node: IrNode) -> usize {
         self.nodes.push(node);
         self.nodes.len() - 1
+    }
+
+    fn push_diagnostic(&mut self, message: impl Into<String>) {
+        self.diagnostics.push(Diagnostic {
+            function: self.name.clone(),
+            message: message.into(),
+        });
     }
 
     fn link(&mut self, from: &[usize], to: usize) {
@@ -474,8 +492,8 @@ impl<'t> FnCtx<'t> {
         }
     }
 
-    fn finish(self) -> FunctionIr {
-        FunctionIr {
+    fn finish(self) -> (FunctionIr, Vec<Diagnostic>) {
+        let ir = FunctionIr {
             id: FunctionId {
                 file: self.file,
                 name: self.name,
@@ -484,7 +502,8 @@ impl<'t> FnCtx<'t> {
             },
             nodes: self.nodes,
             entry: 0,
-        }
+        };
+        (ir, self.diagnostics)
     }
 
     fn push_scope(&mut self) {
@@ -756,6 +775,17 @@ impl<'t> FnCtx<'t> {
         let node = self.unwrap_wrapper(node);
         let kind = node.kind();
         let t = self.table;
+        // A per-function `has_error` stub (see `lower_module`) keeps this
+        // arm from ever firing for a statement inside a collected function -
+        // `has_error` is recursive, so a clean function body means none of
+        // its statements can trip this either. Only a `<module>`-scope
+        // statement can still carry a parse error here. Reported rather
+        // than silently folded into the generic fallback below, matching
+        // the per-function stub's own philosophy of degrading loudly
+        // instead of lowering garbage syntax quietly.
+        if node.has_error() {
+            self.push_diagnostic("statement contains a parse error; lowered as an opaque unit");
+        }
         if t.block_kinds.contains(&kind) {
             return self.lower_block(node, open);
         }
@@ -783,6 +813,9 @@ impl<'t> FnCtx<'t> {
         }
         if t.while_kinds.contains(&kind) {
             return self.lower_while(node, open);
+        }
+        if t.loop_kinds.contains(&kind) {
+            return self.lower_loop(node, open);
         }
         if t.for_kinds.contains(&kind) {
             return self.lower_for(node, open);
@@ -895,22 +928,33 @@ impl<'t> FnCtx<'t> {
             for decl in declarators {
                 let pattern = decl.child_by_field_name(self.table.binding_declarator_name_field);
                 let value = decl.child_by_field_name(self.table.binding_declarator_value_field);
-                cur = self.lower_one_binding(decl, pattern, value, cur);
+                cur = self.lower_one_binding(decl, pattern, value, None, cur);
             }
             return cur;
         }
         let (pattern, value) = self.resolve_binding_pattern_value(node);
-        self.lower_one_binding(node, pattern, value, open)
+        let alt = (!self.table.binding_alt_field.is_empty())
+            .then(|| node.child_by_field_name(self.table.binding_alt_field))
+            .flatten();
+        self.lower_one_binding(node, pattern, value, alt, open)
     }
 
     /// One binding statement: `span_node` supplies the line/label (a whole
     /// `let`/property decl, or - for a declarator-list binding - just the
     /// one declarator, mirroring `vikt-js`'s "one node per declarator").
+    /// `alt` is Rust `let`-else's diverging else-block, `None` everywhere
+    /// else (including every declarator-list binding, since none of the
+    /// languages with that shape has this construct either); when present
+    /// the binding is genuinely two-way (pattern matched vs. didn't) so it
+    /// becomes a `Branch` rather than a `Pure` unit, and `alt` is lowered
+    /// through `lower_stmt` - like any other block - so a `return`/`break`/
+    /// `continue`/call inside it lands in the graph instead of vanishing.
     fn lower_one_binding(
         &mut self,
         span_node: Node<'t>,
         pattern: Option<Node<'t>>,
         value: Option<Node<'t>>,
+        alt: Option<Node<'t>>,
         open: Vec<usize>,
     ) -> Vec<usize> {
         let calls = value.map_or_else(Vec::new, |v| self.extract_calls(v));
@@ -926,9 +970,14 @@ impl<'t> FnCtx<'t> {
         }
         let line = line_of(span_node);
         let label = snippet(span_node, self.source);
+        let kind = if alt.is_some() {
+            NodeKind::Branch
+        } else {
+            NodeKind::Pure
+        };
         let id = self.push(IrNode {
             line: Some(line),
-            kind: NodeKind::Pure,
+            kind,
             defs,
             uses,
             succs: Vec::new(),
@@ -941,7 +990,11 @@ impl<'t> FnCtx<'t> {
             id
         };
         self.link(&open, entry);
-        vec![id]
+        let mut exits = vec![id];
+        if let Some(alt) = alt {
+            exits.extend(self.lower_stmt(alt, vec![id]));
+        }
+        exits
     }
 
     fn lower_assign(&mut self, node: Node<'t>, open: Vec<usize>, is_compound: bool) -> Vec<usize> {
@@ -1104,6 +1157,43 @@ impl<'t> FnCtx<'t> {
         exits
     }
 
+    /// An unconditional loop (Rust's `loop { .. }`): a `Branch` head with no
+    /// condition of its own to evaluate - it always falls into the body -
+    /// modeled the same shape as `lower_while`'s so `break`/`continue` and
+    /// the back edge work identically. `exits` still carries the head node
+    /// itself alongside any `break`s, matching `lower_while`/`lower_for`'s
+    /// conservative "the loop might not run forever" over-approximation
+    /// rather than trying to prove a bare `loop` with no `break` diverges.
+    fn lower_loop(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
+        let Some(body) = field_or_kind(node, t.loop_body_field, "") else {
+            let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
+            self.link(&open, entry);
+            return vec![exit];
+        };
+        let line = line_of(node);
+        let label = snippet(node, self.source);
+        let branch = self.push(IrNode {
+            line: Some(line),
+            kind: NodeKind::Branch,
+            defs: Vec::new(),
+            uses: Vec::new(),
+            succs: Vec::new(),
+            label,
+        });
+        self.link(&open, branch);
+        self.loops.push(LoopCtx {
+            continue_target: branch,
+            breaks: Vec::new(),
+        });
+        let body_exits = self.lower_stmt(body, vec![branch]);
+        self.link(&body_exits, branch);
+        let ctx = self.loops.pop().expect("loop context pushed above");
+        let mut exits = vec![branch];
+        exits.extend(ctx.breaks);
+        exits
+    }
+
     /// A for-each loop: one `Branch` node models the iterator advance,
     /// def'ing the loop pattern and using the iterated expression, so every
     /// iteration is loop-carried by construction and the back edge is real.
@@ -1122,8 +1212,9 @@ impl<'t> FnCtx<'t> {
         let mut uses = Vec::new();
         self.scan_uses(value, &mut uses);
         // The pattern binding must be visible in the body, so this pushes
-        // its own scope covering both rather than letting a later
-        // `lower_block` dispatch on `body` push a second one.
+        // its own scope covering both, ahead of dispatching `body` through
+        // `lower_stmt` below (which pushes its own nested scope only when
+        // `body` turns out to be a `block_kinds` node in its own right).
         if self.table.block_scoped {
             self.push_scope();
         }
@@ -1150,7 +1241,13 @@ impl<'t> FnCtx<'t> {
             continue_target: branch,
             breaks: Vec::new(),
         });
-        let body_exits = self.lower_block_children(body, vec![branch]);
+        // `body` is a single `statement` position (Java's `enhanced_for_
+        // statement`, for instance, allows an unbraced body just like `if`/
+        // `while`), not necessarily a `block_kinds` node - dispatching
+        // through `lower_stmt`, exactly like `lower_while` does, is what
+        // lowers it as one statement instead of splicing its own children
+        // into the loop body as if they were siblings.
+        let body_exits = self.lower_stmt(body, vec![branch]);
         self.link(&body_exits, branch);
         let ctx = self.loops.pop().expect("for loop context pushed above");
         if self.table.block_scoped {

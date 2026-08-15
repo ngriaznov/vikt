@@ -72,6 +72,12 @@ pub(crate) struct GrammarTable {
     /// `modifiers` child means "first named child" isn't safe either).
     pub binding_pattern_kind: &'static str,
     pub binding_value_field: &'static str,
+    /// A field on a `binding_kinds` node holding a diverging else-block for
+    /// a pattern-match binding that can fail, e.g. Rust's `let`-else
+    /// `alternative` (a `block` that must return/break/continue/panic - the
+    /// language forbids falling off its end). Empty for every other
+    /// language modeled here; none has this construct.
+    pub binding_alt_field: &'static str,
     /// A binding node whose actual name/value live one level down, in a
     /// list of declarator children (Java: `int a = 1, b = 2;` is one
     /// `local_variable_declaration` with two `variable_declarator`s under
@@ -144,6 +150,14 @@ pub(crate) struct GrammarTable {
     pub while_cond_field: &'static str,
     pub while_body_field: &'static str,
 
+    /// An unconditional loop with no condition to evaluate at all, e.g.
+    /// Rust's `loop { .. }` (as opposed to `while true { .. }`, which is a
+    /// real `while_kinds` node with a literal condition). Empty for every
+    /// other language modeled here - Python, Java and Kotlin have no
+    /// condition-less loop form.
+    pub loop_kinds: &'static [&'static str],
+    pub loop_body_field: &'static str,
+
     /// A for-each loop: pattern/binding, iterated value, body. None of the
     /// four languages' tables here model a C-style three-clause `for` (Java's
     /// plain `for_statement` falls back to a generic unit — a documented v1
@@ -199,6 +213,7 @@ pub(crate) static RUST: GrammarTable = GrammarTable {
     binding_pattern_field: "pattern",
     binding_pattern_kind: "",
     binding_value_field: "value",
+    binding_alt_field: "alternative",
     binding_declarator_field: "",
     binding_declarator_name_field: "",
     binding_declarator_value_field: "",
@@ -228,6 +243,9 @@ pub(crate) static RUST: GrammarTable = GrammarTable {
     while_kinds: &["while_expression"],
     while_cond_field: "condition",
     while_body_field: "body",
+
+    loop_kinds: &["loop_expression"],
+    loop_body_field: "body",
 
     for_kinds: &["for_expression"],
     for_pattern_field: "pattern",
@@ -267,6 +285,7 @@ pub(crate) static PYTHON: GrammarTable = GrammarTable {
     binding_pattern_field: "",
     binding_pattern_kind: "",
     binding_value_field: "",
+    binding_alt_field: "",
     binding_declarator_field: "",
     binding_declarator_name_field: "",
     binding_declarator_value_field: "",
@@ -296,6 +315,9 @@ pub(crate) static PYTHON: GrammarTable = GrammarTable {
     while_kinds: &["while_statement"],
     while_cond_field: "condition",
     while_body_field: "body",
+
+    loop_kinds: &[],
+    loop_body_field: "",
 
     for_kinds: &["for_statement"],
     for_pattern_field: "left",
@@ -335,6 +357,7 @@ pub(crate) static JAVA: GrammarTable = GrammarTable {
     binding_pattern_field: "",
     binding_pattern_kind: "",
     binding_value_field: "",
+    binding_alt_field: "",
     binding_declarator_field: "declarator",
     binding_declarator_name_field: "name",
     binding_declarator_value_field: "value",
@@ -370,6 +393,9 @@ pub(crate) static JAVA: GrammarTable = GrammarTable {
     while_kinds: &["while_statement"],
     while_cond_field: "condition",
     while_body_field: "body",
+
+    loop_kinds: &[],
+    loop_body_field: "",
 
     for_kinds: &["enhanced_for_statement"],
     for_pattern_field: "name",
@@ -412,6 +438,7 @@ pub(crate) static KOTLIN: GrammarTable = GrammarTable {
     binding_pattern_field: "",
     binding_pattern_kind: "variable_declaration",
     binding_value_field: "",
+    binding_alt_field: "",
     binding_declarator_field: "",
     binding_declarator_name_field: "",
     binding_declarator_value_field: "",
@@ -441,6 +468,9 @@ pub(crate) static KOTLIN: GrammarTable = GrammarTable {
     while_kinds: &["while_statement"],
     while_cond_field: "condition",
     while_body_field: "",
+
+    loop_kinds: &[],
+    loop_body_field: "",
 
     for_kinds: &["for_statement"],
     for_pattern_field: "",

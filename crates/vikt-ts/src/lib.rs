@@ -108,13 +108,16 @@ pub enum TsError {
     },
 }
 
-/// One function whose body degraded to a stub because of a parse error.
+/// A parse error that degraded part of the lowering, scoped to one
+/// function.
 ///
-/// Reported, never silent: a parse error inside a function body only
-/// degrades that function, and this is how a caller finds out which one.
+/// Reported, never silent: a parse error inside a function body degrades
+/// only that function to a stub, and a parse error in top-level (`<module>`)
+/// code degrades only the one statement it's in - either way, this is how a
+/// caller finds out what happened.
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
-    /// The affected function's name.
+    /// The affected function's name (`"<module>"` for top-level code).
     pub function: String,
     /// What went wrong.
     pub message: String,
