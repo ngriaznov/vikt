@@ -8,16 +8,15 @@
 //!
 //! Model: nodes are instructions; edge `v -> u` when `u` reads `v`'s value
 //! (weight `1.0`) or `v` is a branch controlling `u` (`0.6`). Outputs `Ω`
-//! are the non-denylisted [`NodeKind::is_effect`] nodes and absorb; rows
+//! are the non-denylisted `NodeKind::is_effect` nodes and absorb; rows
 //! normalise by *total* out-weight so dead-ending influence is genuinely
 //! lost. With `M = I - Q` over the transient nodes,
 //! `score(v) = L_v·R_v/D_v` — upstream visit count times probability of
 //! ever reaching an output, corrected by the closed-form cycle-return term —
 //! which equals exactly the drop in total delivered influence when `v`'s
-//! row and column are deleted ([`tests::brute_force_matches_deletion`]
-//! checks this against literal re-solves). An `Ω` node scores what it
+//! row and column are deleted (`tests::brute_force_matches_deletion` checks this against literal re-solves). An `Ω` node scores what it
 //! received. Undamped; every nontrivial SCC is solved exactly as a dense
-//! block up to [`EXACT_SCC_CAP`]. Cost `O(E + Σ_C |C|³)`. Deterministic:
+//! block up to `EXACT_SCC_CAP`. Cost `O(E + Σ_C |C|³)`. Deterministic:
 //! `BTreeMap` order, fixed partial pivoting, fixed-sweep Jacobi fallback.
 //!
 //! Known weaknesses: `L` is a route-multiplicity count and inflates in
@@ -90,7 +89,7 @@ const ITER_MAX: usize = 200;
 const ITER_TOL: f64 = 1e-10;
 
 /// Damping applied only inside the fallback solver. A block that reaches
-/// [`EXACT_SCC_CAP`] or a failed pivot may have leak mass too small for plain
+/// `EXACT_SCC_CAP` or a failed pivot may have leak mass too small for plain
 /// Jacobi to contract quickly (or, pathologically, sum to a within-block row
 /// total of exactly `1.0`, i.e. no leak at all, which plain Jacobi would not
 /// converge on). Multiplying every within-block step by `0.999` guarantees
@@ -499,7 +498,7 @@ fn solve_block(edges: &[Vec<(usize, f64)>], members: &[NodeId], rhs: &[f64]) -> 
 }
 
 /// Diagonal of `(I - Q_C)⁻¹` for one nontrivial component, or `None` if the
-/// block exceeds [`EXACT_SCC_CAP`] or its elimination hits a near-zero pivot.
+/// block exceeds `EXACT_SCC_CAP` or its elimination hits a near-zero pivot.
 fn exact_block_diagonal(q: &[Vec<(usize, f64)>], members: &[NodeId]) -> Option<Vec<f64>> {
     let k = members.len();
     let mut local = vec![usize::MAX; q.len()];
@@ -599,7 +598,7 @@ fn lu_solve(lu: &[f64], perm: &[usize], k: usize, rhs: &[f64]) -> Vec<f64> {
 }
 
 /// Bounded, damped Jacobi iteration: the fallback for a block too large for
-/// [`EXACT_SCC_CAP`] or whose elimination hit [`PIVOT_EPS`]. Plain Jacobi
+/// `EXACT_SCC_CAP` or whose elimination hit [`PIVOT_EPS`]. Plain Jacobi
 /// (every update reads only the *previous* sweep's values) rather than
 /// Gauss-Seidel, so the result depends only on the fixed member order, never
 /// on incidental update order. Stops the moment the largest per-node change

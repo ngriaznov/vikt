@@ -15,11 +15,11 @@
 //! device that turns the derivative into a pure structural count (Barlow &
 //! Proschan), not a bug-rate estimate. The forward pass runs in the
 //! log-survival domain (`log1p`/`expm1`) so saturated fan-out keeps
-//! resolution; every divisor is `>= 1/2` by construction; [`SWEEPS`] is a
+//! resolution; every divisor is `>= 1/2` by construction; `SWEEPS` is a
 //! fixed budget so output cannot depend on convergence order; a rootless
-//! closed cycle seeds from its root components ([`entry_set`]). Raw `B_v`
+//! closed cycle seeds from its root components (`entry_set`). Raw `B_v`
 //! decays roughly geometrically per dependence hop —
-//! [`rescale_for_display`] exists for exactly that, measured.
+//! `rescale_for_display` exists for exactly that, measured.
 //!
 //! Known weaknesses (measured — see the report): reconvergence bias
 //! (independence assumed, so diamonds overstate reliability and understate
@@ -190,7 +190,7 @@ fn or_combine(xs: impl Iterator<Item = f64>) -> f64 {
 /// exactly one sweep — every `rho_j` it reads belongs to an
 /// already-completed earlier component. Only an actual dependence cycle
 /// (loop-carried data, or a branch and its own control-dependent body) gets
-/// [`SWEEPS`] iterations.
+/// `SWEEPS` iterations.
 fn forward_pass(succ: &[Vec<NodeId>], comps: &[Vec<NodeId>], is_output: &[bool]) -> Vec<f64> {
     let n = succ.len();
     let mut rho = vec![0.0f64; n];
@@ -250,7 +250,7 @@ fn backward_pass(
 }
 
 /// `1` for a component with no internal edge (its members' own formula never
-/// reads another member of the same component), [`SWEEPS`] otherwise — i.e.
+/// reads another member of the same component), `SWEEPS` otherwise — i.e.
 /// whenever the component is a genuine dependence cycle rather than a
 /// coincidence of Tarjan grouping a singleton with itself.
 fn sweep_count(members: &[NodeId], adj: &[Vec<NodeId>]) -> u32 {
@@ -522,7 +522,7 @@ mod tests {
         assert!((0.0..=1.0).contains(&b[0]));
     }
 
-    /// [`rescale_for_display`] must preserve strict rank order (any
+    /// `rescale_for_display` must preserve strict rank order (any
     /// rank-correlation measurement is blind to this transform by
     /// construction) while actually reaching both ends of `[0, 1]` — the
     /// property that fixes the two-decimal serialization collapse.
@@ -573,7 +573,7 @@ mod tests {
     /// The fixture is one big loop — `acc = acc + x` repeated — chosen
     /// because it puts (almost) every node into a single strongly connected
     /// dependence component via the loop-carried reaching definition, the
-    /// worst case for the [`SWEEPS`]-bounded iteration path rather than the
+    /// worst case for the `SWEEPS`-bounded iteration path rather than the
     /// one-sweep acyclic majority.
     #[test]
     fn scales_linearly_at_5000_nodes() {

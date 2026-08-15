@@ -12,7 +12,7 @@
 //! linear system (Gaussian elimination, fixed pivoting, uncapped by spec —
 //! `O(E + Σ_C |C|³)`). A cycle receiving no outside weight has no defined
 //! level — ecologically, a closed loop with no producer — and is assigned
-//! basal `1.0` ([`tests::isolated_cycle_with_no_input_is_basal`]). Levels
+//! basal `1.0` (`tests::isolated_cycle_with_no_input_is_basal`). Levels
 //! min-max normalise to `0.0..=1.0` per function (all equal ⇒ `0.5`
 //! everywhere). Deterministic throughout.
 //!

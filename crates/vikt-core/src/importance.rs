@@ -874,7 +874,7 @@ pub fn project_to_lines(ir: &FunctionIr, sal: &FunctionImportance) -> Vec<LineSp
 /// inspectable and re-measurable; they are instruments, not products.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scorer {
-    /// The incumbent weighted blend — [`score_of`]. What plain [`analyze`]
+    /// The incumbent weighted blend — `score_of`. What plain [`analyze`]
     /// computes.
     Current,
     /// Schur-complement deletion sensitivity — [`crate::schur`].
