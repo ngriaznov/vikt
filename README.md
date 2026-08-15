@@ -113,8 +113,8 @@ beating every single instrument on 12 of 16 functions.
 | position | (structural fact) | judgement's demonstrated positional lean | +0.25 |
 | boundary tier | (structural fact) | the tier layer's I/O call | −0.05 |
 
-Mechanics (all in `vikt-core/src/panel.rs`, pure Rust like everything
-else): each instrument's per-node scores are projected to lines by `max`,
+Mechanics (all in `vikt-core/src/panel.rs`, pure Rust): each instrument's
+per-node scores are projected to lines by `max`,
 rank-normalised within the function (a scorer's scale is arbitrary across
 functions; its ordering is the signal), then combined by the fitted weights.
 The weights are baked constants with their provenance in the module docs, and
@@ -127,19 +127,23 @@ choice; only the continuous score does.
 The panel carries **two** fitted vectors, because a measured transfer test
 showed the instruments are not equally portable between graph shapes:
 
-- **`Instruction`**: for bytecode frontends (JVM, CPython). The table above.
-- **`Statement`**: for AST frontends (JS/TS). Refit on blind JavaScript /
-  TypeScript labels (9 functions from lodash, express and zod, committed
-  before measurement): strahler and trophic rise to the top instrument
-  weights while schur and pivot fall, because statement-granular graphs feed
-  confluence and depth and starve deletion-sensitivity and reliability.
+- **`Instruction`**: for bytecode/MIR frontends (JVM, CPython, Rust). The
+  table above.
+- **`Statement`**: for every AST-granular frontend — JS/TS (oxc) and the
+  tree-sitter fallback (Rust/Python/Java/Kotlin; see below). Refit on blind
+  JavaScript / TypeScript labels (9 functions from lodash, express and zod,
+  committed before measurement): strahler and trophic rise to the top
+  instrument weights while schur and pivot fall, because statement-granular
+  graphs feed confluence and depth and starve deletion-sensitivity and
+  reliability.
 
-`--scorer panel` picks the profile from the input extension automatically.
-Evidence: applying the Python-fitted weights to JS zero-shot scored 0.603
-against the blind labels; the Statement profile plus two frontend fixes it
-motivated (closure captures, labelled-continue back edges) took it to
-**0.697**, level with the positional null (0.695) that dominates short
-utility functions, with lodash `memoize` alone improving 0.41 → 0.60.
+`--scorer panel` picks the profile from the resolved lowering, not the bare
+extension — a `.py`/`.rs` file gets `Instruction` or `Statement` depending on
+which one ran. Evidence: applying the Python-fitted weights to JS zero-shot
+scored 0.603 against the blind labels; the Statement profile plus two
+frontend fixes it motivated (closure captures, labelled-continue back edges)
+took it to **0.697**, level with the positional null (0.695) that dominates
+short utility functions, with lodash `memoize` alone improving 0.41 → 0.60.
 
 ## How it works, end to end
 
@@ -338,6 +342,21 @@ every call as its own node, which is what lets the denylist isolate
 lowered unreachable, mirroring the measured exception-edge decision from the
 Python frontend.
 
+### The tree-sitter fallback
+
+Python and Rust fall back to a generic tree-sitter walker (`vikt-ts`,
+one walker plus a per-language grammar table) exactly when their primary's
+prerequisite is missing — no `python3`, no `vikt-rust-lower` — logged, never
+silent. Java and Kotlin *source* (`.java`/`.kt`, not just compiled `.class`)
+go through the same walker as their only lowering: new capability, not a
+choice. JS/TS never falls back; oxc stays the sole path. Every tree-sitter
+lowering is statement-granular, scores under `Statement`, and names its
+grammar in the sidecar's `generator` field (`vikt-ts/tree-sitter-rust`, etc.).
+`--lowering <auto|primary|ast>`, on `analyze` and `calibrate` both: `auto`
+(default) probes and falls back, `primary` requires and errors, `ast` forces
+tree-sitter. Measured quality against each primary lives in
+`eval/calibration/ast-fallback-comparison.md`.
+
 ## Usage
 
 ```bash
@@ -351,6 +370,7 @@ vikt Foo.class --inert 'com.acme.Audit' # extend the denylist
 vikt Foo.class --no-denylist            # treat nothing as inert
 vikt app.ts                             # TS/JS: statement-profile panel
 vikt lib.rs                             # Rust via MIR (build tools/rust-lower once)
+vikt Foo.java                           # Java source, tree-sitter (new capability)
 vikt path/to/package --package foo      # whole cargo package, deps compiled not analyzed
 vikt foo.py --scorer strahler           # one instrument alone
 vikt foo.py --scorer current            # the incumbent alone
@@ -360,9 +380,10 @@ vikt foo.py --format sarif              # SARIF 2.1.0 for code scanning
 
 `--scorer` selects which algorithm produces the continuous score: `panel`
 (default), or any single instrument — `current`, `schur`, `pivot`, `trophic`,
-`strahler`. The panel's weight profile follows the input substrate
-automatically (bytecode → Instruction, JS/TS → Statement). Tier assignment
-is identical under every choice.
+`strahler`. The panel's weight profile follows the resolved lowering
+(bytecode/MIR → Instruction, oxc or tree-sitter → Statement). Tier assignment
+is identical under every choice. `--lowering` (see above) picks the lowering
+that decides it.
 
 **Do not score with a single instrument.** The panel is the product. The
 single-instrument flags exist for measurement, audit, and regression
