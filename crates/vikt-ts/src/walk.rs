@@ -59,7 +59,11 @@
 //!   construct (e.g. `= when (x) { ... }`) is still wrapped in a real
 //!   `Return` node by `lower_module`, so effects reachable through *that*
 //!   specific `when` are not lost - only ones nested inside a `when`/`try`
-//!   used mid-block are.
+//!   used mid-block are. A pattern binding nested inside one of these
+//!   (e.g. a match arm's `let`) does get its own id in a `block_scoped`
+//!   language, via `collect_nested_binding_names` - it just isn't a real
+//!   `Binding` node in the graph, so it has no def/use edges of its own
+//!   beyond being folded into the enclosing opaque unit's `uses`.
 //! - Closures/lambdas are not modeled: a nested function's (or Kotlin
 //!   lambda's) free variables are never folded into the enclosing unit's
 //!   uses the way `vikt-js` does for captures, and any call inside one is
@@ -581,6 +585,39 @@ impl<'t> FnCtx<'t> {
         }
     }
 
+    /// Every `binding_kinds` node's pattern names anywhere under `node`,
+    /// skipping nested function bodies - used only by the generic-construct
+    /// fallback (`match`/`switch`/`when`, `try`/`except`/`catch`, ...),
+    /// which never recurses into `lower_binding` for statements it doesn't
+    /// otherwise model. Without pre-declaring these, a pattern binding that
+    /// shadows an outer name (e.g. a match arm's `let y` shadowing a
+    /// parameter `y`) would resolve straight through to the outer
+    /// variable's id when `scan_uses` walks the same span.
+    fn collect_nested_binding_names(&self, node: Node<'t>, out: &mut Vec<&'t str>) {
+        let t = self.table;
+        if t.function_kinds.contains(&node.kind()) {
+            return;
+        }
+        if t.binding_kinds.contains(&node.kind()) {
+            if t.binding_declarator_field.is_empty() {
+                if let (Some(pattern), _) = self.resolve_binding_pattern_value(node) {
+                    self.collect_identifier_texts(pattern, out);
+                }
+            } else {
+                let mut cursor = node.walk();
+                for decl in node.children_by_field_name(t.binding_declarator_field, &mut cursor) {
+                    if let Some(name) = decl.child_by_field_name(t.binding_declarator_name_field) {
+                        self.collect_identifier_texts(name, out);
+                    }
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            self.collect_nested_binding_names(child, out);
+        }
+    }
+
     fn scan_uses(&mut self, node: Node<'t>, out: &mut Vec<VarId>) {
         let mut names = Vec::new();
         self.collect_identifier_texts(node, &mut names);
@@ -862,8 +899,27 @@ impl<'t> FnCtx<'t> {
         }
         // Unrecognized construct (match/switch/when, try/except/catch, item
         // declarations, ...): a generic unit keeps the CFG connected
-        // without pretending to understand it - see module docs.
+        // without pretending to understand it - see module docs. A pattern
+        // binding nested inside (e.g. a match arm's `let`) never goes
+        // through `lower_binding`, so pre-declare it in a throwaway scope
+        // first - otherwise it would resolve as a use of whatever it
+        // shadows once `unit` scans the whole span. Only meaningful for a
+        // `block_scoped` language: a non-block-scoped one has no shadowing
+        // to guard against, and a throwaway scope would instead hide a
+        // legitimately same-variable rebinding from code after this
+        // construct.
+        if t.block_scoped {
+            self.push_scope();
+            let mut names = Vec::new();
+            self.collect_nested_binding_names(node, &mut names);
+            for name in names {
+                self.declare(name);
+            }
+        }
         let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
+        if t.block_scoped {
+            self.pop_scope();
+        }
         self.link(&open, entry);
         vec![exit]
     }
