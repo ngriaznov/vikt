@@ -17,6 +17,7 @@ vikt-jvm = { workspace = true }
 vikt-js = { workspace = true }
 vikt-py = { workspace = true }
 vikt-rs = { workspace = true }
+vikt-ts = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

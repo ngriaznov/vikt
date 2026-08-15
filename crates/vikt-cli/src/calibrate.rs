@@ -42,6 +42,8 @@ use vikt_core::{
     ScoreWeights, Scorer, analyze, analyze_with_scorer, project_to_lines,
 };
 
+use crate::lowering::{self, Lowering};
+
 /// Body-size ceiling, matching the analyze path's `--max-instructions`
 /// default: anything larger has only ever been generated data tables, where
 /// per-line importance is meaningless and mutants are wasted.
@@ -121,21 +123,27 @@ impl Language {
     }
 
     /// The synthetic function name(s) that overlap the extent of a real
-    /// `def`/function and would double-count lines if sampled. Python's
-    /// bytecode compiler synthesizes a code object — named `<module>`,
-    /// `<lambda>`, `<listcomp>` and friends — for constructs that are not
-    /// their own top-level definition; excluding anything with `<` in its
-    /// name catches all of them at once. JavaScript has only one such
-    /// wrapper: the synthetic top-level function this frontend builds to
-    /// hold module-level statements (named exactly `<module>`, see
-    /// `vikt_js::lower_source`). Every other JS function — named or
-    /// anonymous — is a real function whose lines are its own, most often
-    /// an arrow function assigned to a name; excluding it the way Python
-    /// excludes lambdas would silently drop most JS code from calibration.
+    /// `def`/function and would double-count lines if sampled. `<module>`
+    /// is checked first and unconditionally: every frontend that has one
+    /// (Python's bytecode compiler, `vikt_js::lower_source`, and this
+    /// crate's own tree-sitter fallback for Python/Rust - see
+    /// `vikt_ts::LoweredModule`) uses exactly that name for the synthetic
+    /// top-level wrapper, regardless of which lowering actually produced
+    /// it. Beyond that: Python's bytecode compiler also synthesizes a code
+    /// object — `<lambda>`, `<listcomp>` and friends — for constructs that
+    /// are not their own top-level definition; excluding anything with `<`
+    /// in its name catches the rest at once. Every other JS function —
+    /// named or anonymous — is a real function whose lines are its own,
+    /// most often an arrow function assigned to a name; excluding it the
+    /// way Python excludes lambdas would silently drop most JS code from
+    /// calibration.
     fn is_synthetic(self, name: &str) -> bool {
+        if name == "<module>" {
+            return true;
+        }
         match self {
             Self::Python => name.contains('<'),
-            Self::JavaScript => name == "<module>",
+            Self::JavaScript => false,
             // MIR bodies for closures, generators and inline consts carry
             // brace-qualified names (`f::{closure#0}`) and overlap their
             // parent function's extent the way Python lambdas do.
@@ -242,7 +250,24 @@ pub struct CalibrateArgs {
     /// correlations and verdict change.
     #[arg(long, value_enum, default_value_t = Scope::File)]
     scope: Scope,
+
+    /// Which lowering scores Python or Rust sources: `auto` (default) uses
+    /// the primary (CPython bytecode / MIR) frontend where available and
+    /// falls back to the tree-sitter engine otherwise, printing which one
+    /// ran; `primary` requires it; `ast` forces tree-sitter. Unaffected for
+    /// JavaScript/TypeScript, which only ever calibrates through `vikt-js`'s
+    /// in-process oxc engine. Scoring is the only thing this changes:
+    /// mutant *generation* for a Python tree still needs `python3` on PATH
+    /// regardless of this flag, since `vikt_py::calibrate` mutates through
+    /// the interpreter's own `ast` module, not through the panel's IR.
+    #[arg(long, value_enum, default_value_t = Lowering::Auto)]
+    lowering: Lowering,
 }
+
+/// A tree's scoring outcome: every scored function, the highest per-line
+/// score per file, and which lowering produced them both (generator string
+/// plus the panel profile that fits its graph granularity).
+type ScoreOutcome = (Vec<ScoredFn>, FileScores, String, PanelProfile);
 
 /// A function the panel scored, keyed to the copied tree.
 struct ScoredFn {
@@ -388,12 +413,18 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     }
 
-    let (lang, mut scored, file_scores) = if rust {
-        let (s, f) = score_crate(&copy.root)?;
-        (Language::Rust, s, f)
+    let (lang, (mut scored, file_scores, generator, profile)) = if rust {
+        (Language::Rust, score_crate(&copy.root, args.lowering)?)
     } else {
-        score_by_majority(&copy.root, &scan, &args.python)
+        score_by_majority(&copy.root, &scan, &args.python, args.lowering)
     };
+    println!(
+        "calibrate: scored via {generator} ({} profile)",
+        match profile {
+            PanelProfile::Instruction => "instruction",
+            PanelProfile::Statement => "statement",
+        }
+    );
 
     if lang == Language::JavaScript && scored.iter().any(|f| is_typescript(&f.file)) {
         println!(
@@ -470,7 +501,15 @@ repository's own type check is read as killed, indistinguishable from one an act
     let pairs = pair_lines(sampled, &file_scores, &filescope.scores, args.scope, &tally);
     let v = judge(sampled, &pairs, &tally);
     if let Some(path) = &args.emit_dataset {
-        let rows = write_dataset(path, &args.path, lang, sampled, &pairs, &tally, &filescope)?;
+        let rows = write_dataset(
+            path,
+            &args.path,
+            (lang, profile),
+            sampled,
+            &pairs,
+            &tally,
+            &filescope,
+        )?;
         println!("dataset: wrote {rows} rows to {}", path.display());
     }
     Ok(if args.gate {
@@ -505,13 +544,15 @@ fn score_by_majority(
     root: &Path,
     scan: &TreeScan,
     python: &str,
-) -> (Language, Vec<ScoredFn>, FileScores) {
-    let py = (!scan.py.is_empty()).then(|| score_tree(root, &scan.py, Language::Python, python));
-    let js =
-        (!scan.js.is_empty()).then(|| score_tree(root, &scan.js, Language::JavaScript, python));
+    lowering: Lowering,
+) -> (Language, ScoreOutcome) {
+    let py = (!scan.py.is_empty())
+        .then(|| score_tree(root, &scan.py, Language::Python, python, lowering));
+    let js = (!scan.js.is_empty())
+        .then(|| score_tree(root, &scan.js, Language::JavaScript, python, lowering));
     match (py, js) {
-        (Some(p), None) => (Language::Python, p.0, p.1),
-        (None, Some(j)) => (Language::JavaScript, j.0, j.1),
+        (Some(p), None) => (Language::Python, p),
+        (None, Some(j)) => (Language::JavaScript, j),
         (Some(p), Some(j)) => {
             let py_lines: usize = p.1.values().map(BTreeMap::len).sum();
             let js_lines: usize = j.1.values().map(BTreeMap::len).sum();
@@ -526,14 +567,40 @@ fn score_by_majority(
                 other = other.label(),
             );
             if winner == Language::Python {
-                (Language::Python, p.0, p.1)
+                (Language::Python, p)
             } else {
-                (Language::JavaScript, j.0, j.1)
+                (Language::JavaScript, j)
             }
         }
         (None, None) => {
             unreachable!("checked above: at least one of scan.py, scan.js is non-empty")
         }
+    }
+}
+
+/// Whether `lang` should score through the tree-sitter fallback rather than
+/// its primary frontend, deciding once up front rather than discovering
+/// unavailability once per file in [`score_tree`]'s loop. JavaScript has no
+/// primary/fallback split at all - `vikt-js`'s oxc engine is the only
+/// lowering it has ever had - so this is always `false` for it regardless
+/// of `lowering`.
+fn use_tree_sitter(lang: Language, python: &str, lowering: Lowering) -> bool {
+    match (lang, lowering) {
+        (Language::Python, Lowering::Ast) => true,
+        (Language::JavaScript, _) | (Language::Python, Lowering::Primary) => false,
+        (Language::Python, Lowering::Auto) => {
+            let available = lowering::python_available(python);
+            if !available {
+                println!(
+                    "calibrate: `{python}` not found; scoring Python sources via the tree-sitter fallback (pass --lowering primary to require {python})"
+                );
+            }
+            !available
+        }
+        // Rust lowers whole packages, not files — see `score_crate`, which
+        // makes this decision for itself against `vikt_rs::lower_crate`'s
+        // own error rather than a separate up-front probe.
+        (Language::Rust, _) => unreachable!("use_tree_sitter is never called for Rust"),
     }
 }
 
@@ -548,46 +615,80 @@ fn score_tree(
     files: &[PathBuf],
     lang: Language,
     python: &str,
-) -> (Vec<ScoredFn>, FileScores) {
+    lowering: Lowering,
+) -> ScoreOutcome {
+    let via_ts = use_tree_sitter(lang, python, lowering);
+    let profile = if via_ts {
+        PanelProfile::Statement
+    } else {
+        lang.panel_profile()
+    };
+    let generator = match (lang, via_ts) {
+        (Language::Python, true) => "vikt-ts/tree-sitter-python",
+        (Language::Python, false) => "vikt-py/dis",
+        (Language::JavaScript, _) => "vikt-js/oxc",
+        (Language::Rust, _) => unreachable!("score_tree is never called for Rust"),
+    };
     let mut scored = Vec::new();
     let mut file_scores = FileScores::new();
     for rel in files.iter().filter(|p| !is_test_path(p, lang)) {
-        let functions = match lang {
-            Language::Python => match vikt_py::lower_file_with(&root.join(rel), python) {
+        let functions = match (lang, via_ts) {
+            (Language::Python, true) => match vikt_ts::lower_file(&root.join(rel)) {
                 Ok(l) => l.functions,
                 Err(e) => {
                     eprintln!("calibrate: skipping {}: {e}", rel.display());
                     continue;
                 }
             },
-            Language::JavaScript => match vikt_js::lower_file(&root.join(rel)) {
+            (Language::Python, false) => match vikt_py::lower_file_with(&root.join(rel), python) {
                 Ok(l) => l.functions,
                 Err(e) => {
                     eprintln!("calibrate: skipping {}: {e}", rel.display());
                     continue;
                 }
             },
-            // Rust lowers whole packages, not files — see `score_crate`.
-            Language::Rust => unreachable!("score_tree is never called for Rust"),
+            (Language::JavaScript, _) => match vikt_js::lower_file(&root.join(rel)) {
+                Ok(l) => l.functions,
+                Err(e) => {
+                    eprintln!("calibrate: skipping {}: {e}", rel.display());
+                    continue;
+                }
+            },
+            (Language::Rust, _) => unreachable!("score_tree is never called for Rust"),
         };
-        score_functions(rel, &functions, lang, &mut scored, &mut file_scores);
+        score_functions(
+            rel,
+            &functions,
+            lang,
+            profile,
+            &mut scored,
+            &mut file_scores,
+        );
     }
-    (scored, file_scores)
+    (scored, file_scores, generator.to_owned(), profile)
 }
 
-/// Lowers and panel-scores a whole cargo package through the MIR frontend.
-/// One lowering covers every file, so unlike [`score_tree`] there is no
-/// per-file skip: a package that does not compile does not calibrate, and
-/// says why through cargo's own diagnostics. Functions whose spans resolve
-/// outside the copy (macro expansions, generated code) never reach here —
-/// the lowering already drops foreign lines.
-fn score_crate(root: &Path) -> Result<(Vec<ScoredFn>, FileScores), Box<dyn Error>> {
-    let modules = vikt_rs::lower_crate(root, None)?;
+/// Lowers and panel-scores a whole cargo package, `auto`/`primary`/`ast` as
+/// documented on [`Lowering`]. The primary path is one lowering covering
+/// every file, so unlike [`score_tree`] there is no per-file skip there: a
+/// package that does not compile does not calibrate, and says why through
+/// cargo's own diagnostics. Functions whose spans resolve outside the copy
+/// (macro expansions, generated code) never reach here — the lowering
+/// already drops foreign lines. The tree-sitter fallback path (see
+/// [`lowering::lower_rust_crate`]) has no such single-shot lowering, so it
+/// walks the package's own sources file by file instead, same as
+/// [`score_tree`].
+fn score_crate(root: &Path, lowering_arg: Lowering) -> Result<ScoreOutcome, Box<dyn Error>> {
+    let lowered = lowering::lower_rust_crate(root, None, lowering_arg)?;
     let mut scored = Vec::new();
     let mut file_scores = FileScores::new();
-    for module in &modules {
-        let file = Path::new(&module.file);
-        let rel = file.strip_prefix(root).unwrap_or(file).to_path_buf();
+    let mut by_file: BTreeMap<PathBuf, Vec<FunctionIr>> = BTreeMap::new();
+    for ir in lowered.functions {
+        let file = PathBuf::from(&ir.id.file);
+        let rel = file.strip_prefix(root).unwrap_or(&file).to_path_buf();
+        by_file.entry(rel).or_default().push(ir);
+    }
+    for (rel, functions) in by_file {
         // An absolute path that did not strip is outside the copy entirely:
         // a dependency's sources, or the sysroot. Not ours to mutate.
         if rel.is_absolute() || is_test_path(&rel, Language::Rust) {
@@ -595,13 +696,14 @@ fn score_crate(root: &Path) -> Result<(Vec<ScoredFn>, FileScores), Box<dyn Error
         }
         score_functions(
             &rel,
-            &module.functions,
+            &functions,
             Language::Rust,
+            lowered.profile,
             &mut scored,
             &mut file_scores,
         );
     }
-    Ok((scored, file_scores))
+    Ok((scored, file_scores, lowered.generator, lowered.profile))
 }
 
 /// The shared per-function scoring step: panel scores projected to lines
@@ -613,6 +715,7 @@ fn score_functions(
     rel: &Path,
     functions: &[vikt_core::FunctionIr],
     lang: Language,
+    profile: PanelProfile,
     scored: &mut Vec<ScoredFn>,
     file_scores: &mut FileScores,
 ) {
@@ -647,7 +750,7 @@ fn score_functions(
             ir,
             &Denylist::new(),
             &ScoreWeights::default(),
-            Scorer::Panel(lang.panel_profile()),
+            Scorer::Panel(profile),
         );
         let spans = project_to_lines(ir, &sal);
         let Some(lo) = spans.iter().map(|s| s.start).min() else {
@@ -1117,13 +1220,14 @@ impl From<FunctionFeatures> for FunctionFeaturesRow {
 fn write_dataset(
     path: &Path,
     target: &Path,
-    lang: Language,
+    scored_via: (Language, PanelProfile),
     sampled: &[ScoredFn],
     pairs: &[PairedLine],
     _tally: &Tally,
     filescope: &Filescope,
 ) -> Result<usize, Box<dyn Error>> {
-    let profile = match lang.panel_profile() {
+    let (lang, scored_profile) = scored_via;
+    let profile = match scored_profile {
         PanelProfile::Instruction => "instruction",
         PanelProfile::Statement => "statement",
     };

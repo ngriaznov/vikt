@@ -1,5 +1,5 @@
-//! `vikt` — produce a per-line importance sidecar for a compiled class or a
-//! Python source file.
+//! `vikt` — produce a per-line importance sidecar for a compiled class, or a
+//! Rust, Python, JS/TS, Java or Kotlin source file.
 //!
 //! ```text
 //! vikt Foo.class                 # JSON sidecar on stdout
@@ -7,6 +7,8 @@
 //! vikt Foo.class --stats         # tier histogram and timing
 //! vikt foo.py --format sarif     # SARIF 2.1.0 for code-scanning uploads
 //! vikt foo.py --scope file       # blend in each function's call-graph standing
+//! vikt foo.rs --lowering ast     # force the tree-sitter fallback
+//! vikt Foo.kt                    # Kotlin source - tree-sitter, always
 //! vikt calibrate src/ --test-cmd "python3 -m unittest"  # self-calibration
 //! vikt calibrate src/ --test-cmd "node --test"          # ...or JS/TS
 //! vikt calibrate pkg/ --test-cmd "cargo test"            # ...or a cargo package
@@ -20,6 +22,7 @@
 #![allow(clippy::cast_precision_loss, clippy::doc_markdown)]
 
 mod calibrate;
+mod lowering;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,6 +30,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use lowering::Lowering;
 use vikt_core::ir::FunctionIr;
 use vikt_core::{
     Denylist, FunctionImportance, PanelProfile, SarifLog, ScopedFunction, ScoreWeights, Scorer,
@@ -84,9 +88,9 @@ enum Scope {
     about = "Deterministic per-line importance tiering over function bodies",
     long_about = "Classifies every statement in every function body as core, boundary, \
 plumbing or inert, and projects the result onto source lines.\n\n\
-Accepts a JVM .class file or a Python source file. No model runs: every tier is \
-the output of a dominance, loop or reachability query, and every span carries \
-the reason that produced it.",
+Accepts a JVM .class file, a Rust file or cargo package, or a Python, JS/TS, Java \
+or Kotlin source file. No model runs: every tier is the output of a dominance, \
+loop or reachability query, and every span carries the reason that produced it.",
     // The analyze surface stays flag-style; `calibrate` is the one verb-shaped
     // operation. These two settings are what let a positional input and a
     // subcommand share the top level without either becoming spuriously
@@ -98,7 +102,8 @@ struct Args {
     #[command(subcommand)]
     command: Option<Cmd>,
 
-    /// The `.class` or `.py` file to analyze.
+    /// The `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java` or `.kt` file (or a
+    /// Rust cargo package: a directory or `Cargo.toml`) to analyze.
     #[arg(required = true)]
     input: Option<PathBuf>,
 
@@ -154,6 +159,17 @@ struct Args {
     #[arg(long, value_name = "NAME")]
     package: Option<String>,
 
+    /// Which lowering to use: `auto` (default) uses the primary
+    /// bytecode/MIR frontend where available and falls back to the
+    /// tree-sitter engine (noted on stderr) otherwise; `primary` requires
+    /// the primary and errors exactly as before if it's missing; `ast`
+    /// forces the tree-sitter engine even where the primary would work.
+    /// `.class` and `.java`/`.kt` source each have only one lowering, so
+    /// this is a no-op for them; `.js`/`.ts` rejects `ast` explicitly (see
+    /// `lowering::lower_js`).
+    #[arg(long, value_enum, default_value_t = Lowering::Auto)]
+    lowering: Lowering,
+
     /// Skip function bodies larger than this many instructions (0 = no limit).
     ///
     /// The analysis is quadratic in body size, and every body ever observed
@@ -208,31 +224,24 @@ enum ScorerArg {
     Strahler,
 }
 
-/// Resolves the CLI's flat `--scorer` choice to a [`Scorer`], consulting the
-/// input extension only for [`ScorerArg::Panel`]: that's the one variant
-/// whose weight vector depends on the dependence-graph granularity the
-/// frontend produces (see [`PanelProfile`]). Every other variant is a single
-/// instrument with no substrate-specific fit, so the extension is unused for
-/// them.
-fn resolve_scorer(arg: ScorerArg, ext: &str) -> Scorer {
+/// Resolves the CLI's flat `--scorer` choice to a [`Scorer`], consulting
+/// `profile` only for [`ScorerArg::Panel`]: that's the one variant whose
+/// weight vector depends on the dependence-graph granularity the *lowering
+/// that actually ran* produced (see [`PanelProfile`]) - `profile` comes
+/// straight from [`lowering::Lowered`], not re-derived from the input's
+/// extension, since the same extension can lower two different ways
+/// (`.rs`/`.py` with or without their primary frontend) and only one of
+/// those is instruction-granular. Every other `ScorerArg` variant is a
+/// single instrument with no substrate-specific fit, so `profile` is unused
+/// for them.
+fn resolve_scorer(arg: ScorerArg, profile: PanelProfile) -> Scorer {
     match arg {
-        ScorerArg::Panel => Scorer::Panel(profile_for_ext(ext)),
+        ScorerArg::Panel => Scorer::Panel(profile),
         ScorerArg::Current => Scorer::Current,
         ScorerArg::Schur => Scorer::Schur,
         ScorerArg::Pivot => Scorer::Pivot,
         ScorerArg::Trophic => Scorer::Trophic,
         ScorerArg::Strahler => Scorer::Strahler,
-    }
-}
-
-/// Which panel weight vector fits an input's dependence-graph granularity,
-/// by extension: the oxc-lowered JS/TS frontend is statement-granular (one
-/// node per statement), everything else lowers from bytecode and is
-/// instruction-granular. Mirrors the extension match in [`run`].
-fn profile_for_ext(ext: &str) -> PanelProfile {
-    match ext {
-        "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => PanelProfile::Statement,
-        _ => PanelProfile::Instruction,
     }
 }
 
@@ -276,7 +285,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let lower_started = Instant::now();
-    let (generator, functions, note) = match ext {
+    let (generator, functions, note, profile) = match ext {
         "class" => {
             let bytes = std::fs::read(input)?;
             let lowered = vikt_jvm::lower_class(&bytes)?;
@@ -296,30 +305,38 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 )
             });
-            ("vikt-jvm/mokapot".to_owned(), lowered.functions, note)
+            (
+                "vikt-jvm/mokapot".to_owned(),
+                lowered.functions,
+                note,
+                PanelProfile::Instruction,
+            )
         }
         "py" => {
-            let lowered = vikt_py::lower_file_with(input, &args.python)?;
-            ("vikt-py/dis".to_owned(), lowered.functions, None)
+            let lowered = lowering::lower_python(input, &args.python, args.lowering)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
         }
         "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => {
-            let lowered = vikt_js::lower_file(input)?;
-            ("vikt-js/oxc".to_owned(), lowered.functions, None)
+            let lowered = lowering::lower_js(input, args.lowering)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
+        }
+        "java" | "kt" | "kts" => {
+            let lowered = lowering::lower_ts_source(input)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
         }
         "rs" => {
-            let functions = if is_crate_input {
+            let lowered = if is_crate_input {
                 // Whole package through cargo: every source file of the
                 // primary package, dependencies compiled but not analyzed.
-                let modules = vikt_rs::lower_crate(input, args.package.as_deref())?;
-                modules.into_iter().flat_map(|m| m.functions).collect()
+                lowering::lower_rust_crate(input, args.package.as_deref(), args.lowering)?
             } else {
-                vikt_rs::lower_file(input)?.functions
+                lowering::lower_rust_file(input, args.lowering)?
             };
-            ("vikt-rs/rustc_public".to_owned(), functions, None)
+            (lowered.generator, lowered.functions, None, lowered.profile)
         }
         other => {
             return Err(format!(
-                "unsupported input type {other:?}: expected a .class, .py, .js or .ts file"
+                "unsupported input type {other:?}: expected a .class, .py, .js/.ts, .rs, .java or .kt file"
             )
             .into());
         }
@@ -353,7 +370,12 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             );
             continue;
         }
-        let sal = analyze_with_scorer(ir, &denylist, &weights, resolve_scorer(args.scorer, ext));
+        let sal = analyze_with_scorer(
+            ir,
+            &denylist,
+            &weights,
+            resolve_scorer(args.scorer, profile),
+        );
         sidecar.push(ir, &sal);
         analyzed += 1;
         if args.scope == Scope::File {

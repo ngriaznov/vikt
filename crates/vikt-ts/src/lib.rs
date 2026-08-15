@@ -11,10 +11,11 @@
 //! writes). Every lowering here is statement-granular - see [`walk`]'s
 //! module docs for why and for the known v1 simplifications.
 //!
-//! Rust and Python have complete tables. `Language::Java` and
-//! `Language::Kotlin` exist so callers can match on a stable enum, but their
-//! tables land in a later stage; lowering either today returns
-//! [`TsError::NotYetImplemented`].
+//! All four languages have complete tables. `Language::Java` and
+//! `Language::Kotlin` are also the *only* path for source-level `.java`/
+//! `.kt` analysis - today's other frontends only read compiled `.class`
+//! bytecode, so tree-sitter is not a fallback for these two, it's new
+//! capability.
 
 mod grammar;
 mod walk;
@@ -46,19 +47,21 @@ impl Language {
         }
     }
 
-    fn ts_language(self) -> Option<tree_sitter::Language> {
+    fn ts_language(self) -> tree_sitter::Language {
         match self {
-            Self::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
-            Self::Python => Some(tree_sitter_python::LANGUAGE.into()),
-            Self::Java | Self::Kotlin => None,
+            Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Python => tree_sitter_python::LANGUAGE.into(),
+            Self::Java => tree_sitter_java::LANGUAGE.into(),
+            Self::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
         }
     }
 
-    fn table(self) -> Option<&'static grammar::GrammarTable> {
+    fn table(self) -> &'static grammar::GrammarTable {
         match self {
-            Self::Rust => Some(&grammar::RUST),
-            Self::Python => Some(&grammar::PYTHON),
-            Self::Java | Self::Kotlin => None,
+            Self::Rust => &grammar::RUST,
+            Self::Python => &grammar::PYTHON,
+            Self::Java => &grammar::JAVA,
+            Self::Kotlin => &grammar::KOTLIN,
         }
     }
 }
@@ -81,12 +84,6 @@ pub enum TsError {
         path: String,
         /// The extension that didn't match anything.
         ext: String,
-    },
-    /// The language is recognized but its grammar table isn't wired up yet.
-    #[error("{language:?}: tree-sitter table not implemented yet")]
-    NotYetImplemented {
-        /// The unimplemented language.
-        language: Language,
     },
     /// The grammar's ABI didn't match the linked tree-sitter runtime.
     #[error("{path}: parser could not load the grammar")]
@@ -166,12 +163,8 @@ pub fn lower_source(
     source: &str,
     file: &str,
 ) -> Result<LoweredModule, TsError> {
-    let table = language
-        .table()
-        .ok_or(TsError::NotYetImplemented { language })?;
-    let ts_language = language
-        .ts_language()
-        .ok_or(TsError::NotYetImplemented { language })?;
+    let table = language.table();
+    let ts_language = language.ts_language();
 
     let mut parser = tree_sitter::Parser::new();
     parser

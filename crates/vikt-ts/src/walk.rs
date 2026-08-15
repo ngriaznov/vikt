@@ -15,28 +15,61 @@
 //!
 //! There is no symbol table here - just node-kind pattern matching - so
 //! def/use comes from a shadowing-aware name-based scope stack instead of
-//! true binding resolution. A `block_scoped` language (Rust) pushes a fresh
-//! scope per `block`, so `let x` in a nested block never clobbers an outer
-//! `x`; a non-block-scoped language (Python) keeps one scope for the whole
-//! function, matching real Python scoping (only `def` introduces scope).
-//! Names that resolve to nothing in scope become per-name ambient variables,
-//! shared for the whole function - the same "unresolved reference still
-//! tracks a flow" treatment `vikt-js` gives ambient JS globals.
+//! true binding resolution. A `block_scoped` language (Rust, Java, Kotlin)
+//! pushes a fresh scope per `block`, so `let x`/a local declaration in a
+//! nested block never clobbers an outer `x`; a non-block-scoped language
+//! (Python) keeps one scope for the whole function, matching real Python
+//! scoping (only `def` introduces scope). Names that resolve to nothing in
+//! scope become per-name ambient variables, shared for the whole function -
+//! the same "unresolved reference still tracks a flow" treatment `vikt-js`
+//! gives ambient JS globals.
+//!
+//! # Classes
+//!
+//! A `class_kinds` node (Java/Kotlin only) isn't its own `FunctionIr`: its
+//! methods are collected and named `Type::method`, matching the JVM
+//! frontend's naming shape (see `owner_prefix`), and its direct field/
+//! property declarations are lowered as ordinary statements into the
+//! `<module>` wrapper, at module scope - not nested inside any per-class
+//! scope, since this frontend does not model class-level shadowing.
+//!
+//! # Unfielded grammars
+//!
+//! `tree-sitter-rust`, `-python` and `-java` field essentially everything
+//! this walker reads. `tree-sitter-kotlin-ng` doesn't: `call_expression`,
+//! `navigation_expression`, `for_statement`, `property_declaration` and
+//! `if_expression`'s then/else are unfielded on their parent (verified
+//! against the crate's own `node-types.json`). Every slot that can be
+//! affected takes both a field name and a kind-search or positional
+//! fallback in [`GrammarTable`]; the `field_or_*` helpers below try the
+//! field first and only fall back when it's empty or absent, so Rust/
+//! Python/Java - whose fields always resolve - never take the fallback
+//! path.
 //!
 //! # Known v1 simplifications
 //!
-//! - `match`/`switch` and `try`/`except` are not specially modeled: an
-//!   unmatched node kind falls back to a single `Pure` unit spanning the
-//!   whole construct. Calls anywhere inside it are still extracted (so an
-//!   opaque call three levels into a `match` arm is still visible as an
-//!   effect), but a `return`/`throw` inside one is not - it is invisible to
-//!   the effect classification. Not exercised by the required test surface;
-//!   flagged here because it is the sharpest edge in this file.
-//! - Closures are not modeled: a nested function's free variables are never
-//!   folded into the enclosing unit's uses the way `vikt-js` does for
-//!   captures.
+//! - `match`/`switch`/`when` and `try`/`except`/`catch` are not specially
+//!   modeled: an unmatched node kind falls back to a single `Pure` unit
+//!   spanning the whole construct. Calls anywhere inside it are still
+//!   extracted (so an opaque call three levels into a `match` arm is still
+//!   visible as an effect), but a `return`/`throw` inside one is not - it is
+//!   invisible to the effect classification. Not exercised by the required
+//!   test surface; flagged here because it is the sharpest edge in this
+//!   file. The one exception: a Kotlin expression-bodied function's tail
+//!   construct (e.g. `= when (x) { ... }`) is still wrapped in a real
+//!   `Return` node by `lower_module`, so effects reachable through *that*
+//!   specific `when` are not lost - only ones nested inside a `when`/`try`
+//!   used mid-block are.
+//! - Closures/lambdas are not modeled: a nested function's (or Kotlin
+//!   lambda's) free variables are never folded into the enclosing unit's
+//!   uses the way `vikt-js` does for captures, and any call inside one is
+//!   attributed to the *enclosing* function rather than kept separate.
 //! - Loop labels are not modeled: `break`/`continue` always target the
 //!   innermost loop.
+//! - Java's three-clause `for` and Kotlin's `do`/`while` fall back to the
+//!   generic unit above; only the for-each/while forms are modeled.
+//! - Java's `object_creation_expression` (`new Foo(...)`) is not extracted
+//!   as its own `Call` node - see the comment on `JAVA.call_kinds`.
 //! - Call-use accounting is deliberately coarser than `vikt-js`'s: rather
 //!   than folding a nested call's temp into exactly the "direct" enclosing
 //!   unit, every unit's `uses` includes every identifier in its span
@@ -82,6 +115,89 @@ fn collect_functions<'t>(table: &'static GrammarTable, node: Node<'t>, out: &mut
     }
 }
 
+/// The nearest enclosing `class_kinds` ancestor's name, for `Type::method`
+/// naming matching the JVM frontend's shape. `None` for a language with no
+/// `class_kinds` (Rust, Python) or a function with no enclosing type
+/// (Kotlin's top-level `fun`).
+fn owner_prefix(table: &'static GrammarTable, fnode: Node<'_>, source: &str) -> Option<String> {
+    let mut cur = fnode.parent();
+    while let Some(n) = cur {
+        if table.class_kinds.contains(&n.kind()) {
+            return n
+                .child_by_field_name(table.class_name_field)
+                .and_then(|nm| nm.utf8_text(source.as_bytes()).ok())
+                .map(str::to_owned);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// `child_by_field_name`, falling back to the first named child of `kind`
+/// when the field is unused (empty) or absent - Kotlin doesn't field
+/// `function_body`, `function_value_parameters` or `class_body` on their
+/// owning nodes.
+fn field_or_kind<'t>(node: Node<'t>, field: &str, kind: &str) -> Option<Node<'t>> {
+    if !field.is_empty()
+        && let Some(n) = node.child_by_field_name(field)
+    {
+        return Some(n);
+    }
+    first_child_of_kind(node, kind)
+}
+
+fn first_child_of_kind<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
+    if kind.is_empty() {
+        return None;
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).find(|c| c.kind() == kind)
+}
+
+/// `child_by_field_name`, falling back to the `n`th named child - Kotlin's
+/// `if_expression` fields only `condition`; then/else are just the next
+/// named children in order.
+fn field_or_nth<'t>(node: Node<'t>, field: &str, n: usize) -> Option<Node<'t>> {
+    if !field.is_empty()
+        && let Some(x) = node.child_by_field_name(field)
+    {
+        return Some(x);
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).nth(n)
+}
+
+/// `child_by_field_name`, falling back to the last named child - the body
+/// position in a language that doesn't field it (Kotlin's `while_statement`/
+/// `for_statement`) is reliably the final child.
+fn field_or_last<'t>(node: Node<'t>, field: &str) -> Option<Node<'t>> {
+    if !field.is_empty()
+        && let Some(x) = node.child_by_field_name(field)
+    {
+        return Some(x);
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).last()
+}
+
+/// Resolves a member-access node's object/property children, falling back
+/// to positional (first/last named child) when the grammar doesn't field
+/// them at all - Kotlin's `navigation_expression`.
+fn member_parts<'t>(table: &GrammarTable, node: Node<'t>) -> (Option<Node<'t>>, Option<Node<'t>>) {
+    let object = (!table.member_object_field.is_empty())
+        .then(|| node.child_by_field_name(table.member_object_field))
+        .flatten();
+    let property = (!table.member_property_field.is_empty())
+        .then(|| node.child_by_field_name(table.member_property_field))
+        .flatten();
+    if object.is_some() && property.is_some() {
+        return (object, property);
+    }
+    let mut cursor = node.walk();
+    let children: Vec<Node<'t>> = node.named_children(&mut cursor).collect();
+    (children.first().copied(), children.last().copied())
+}
+
 /// Lowers a whole parsed tree into one [`FunctionIr`] per function plus a
 /// `<module>` wrapper for top-level statements, mirroring `vikt-js`'s shape.
 pub(crate) fn lower_module(
@@ -102,11 +218,14 @@ pub(crate) fn lower_module(
     functions.push(module.finish());
 
     for fnode in fn_nodes {
-        let name = fnode
+        let bare_name = fnode
             .child_by_field_name(table.function_name_field)
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-            .unwrap_or("<anon>")
-            .to_owned();
+            .unwrap_or("<anon>");
+        let name = owner_prefix(table, fnode, source).map_or_else(
+            || bare_name.to_owned(),
+            |owner| format!("{owner}::{bare_name}"),
+        );
         let decl_line = line_of(fnode);
 
         // A parse error anywhere in the body (has_error is recursive, so
@@ -131,12 +250,25 @@ pub(crate) fn lower_module(
             continue;
         }
 
-        let params = fnode.child_by_field_name(table.function_params_field);
-        let body = fnode.child_by_field_name(table.function_body_field);
+        let params = field_or_kind(
+            fnode,
+            table.function_params_field,
+            table.function_params_kind,
+        );
+        let raw_body = field_or_kind(fnode, table.function_body_field, table.function_body_kind);
         let mut lowerer = FnCtx::new(table, source, file, &name, decl_line);
         lowerer.lower_params(params);
-        if let Some(b) = body {
-            let _ = lowerer.lower_block_children(b, vec![0]);
+        if let Some(raw) = raw_body {
+            let body = lowerer.unwrap_wrapper(raw);
+            if table.block_kinds.contains(&body.kind()) {
+                let _ = lowerer.lower_block_children(body, vec![0]);
+            } else {
+                // Expression body (Kotlin `fun f() = expr`): the tail
+                // expression's value is what the function returns, modeled
+                // the same way `vikt-js` models an arrow's expr-body.
+                let (entry, _) = lowerer.unit(body, NodeKind::Return, vec![]);
+                lowerer.link(&[0], entry);
+            }
         }
         functions.push(lowerer.finish());
     }
@@ -179,10 +311,9 @@ fn callee_text(table: &'static GrammarTable, node: Node<'_>, source: &str) -> St
             return true;
         }
         if table.member_access_kinds.contains(&node.kind()) {
-            let object_ok = node
-                .child_by_field_name(table.member_object_field)
-                .is_some_and(|o| chain(table, o, source, out));
-            if let Some(p) = node.child_by_field_name(table.member_property_field) {
+            let (object, property) = member_parts(table, node);
+            let object_ok = object.is_some_and(|o| chain(table, o, source, out));
+            if let Some(p) = property {
                 out.push(
                     p.utf8_text(source.as_bytes())
                         .unwrap_or_default()
@@ -199,6 +330,61 @@ fn callee_text(table: &'static GrammarTable, node: Node<'_>, source: &str) -> St
     } else {
         snippet(node, source)
     }
+}
+
+/// Resolves a call node's callee text across three shapes: a single field
+/// pointing to an identifier-or-member-chain (Rust/Python's `function`); two
+/// paired fields naming the receiver and method separately, receiver
+/// optional (Java's `method_invocation`); or no fields at all, callee is
+/// simply the first named child (Kotlin's `call_expression`).
+fn call_callee(table: &'static GrammarTable, node: Node<'_>, source: &str) -> String {
+    if !table.call_object_field.is_empty() || !table.call_name_field.is_empty() {
+        let name = (!table.call_name_field.is_empty())
+            .then(|| node.child_by_field_name(table.call_name_field))
+            .flatten()
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .unwrap_or("<dynamic>");
+        let object = (!table.call_object_field.is_empty())
+            .then(|| node.child_by_field_name(table.call_object_field))
+            .flatten();
+        return match object {
+            Some(obj) => format!("{}.{name}", callee_text(table, obj, source)),
+            None => name.to_owned(),
+        };
+    }
+    let callee_node = if table.call_callee_field.is_empty() {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor).next()
+    } else {
+        node.child_by_field_name(table.call_callee_field)
+    };
+    callee_node.map_or_else(|| "<dynamic>".to_owned(), |c| callee_text(table, c, source))
+}
+
+/// Whether an `assign_kinds` node is a compound assignment. Only meaningful
+/// for a language that reuses one node kind for both and disambiguates via
+/// the operator field's text (Java, Kotlin) - always `false` when
+/// `assign_operator_field` is unused, since that language instead lists a
+/// dedicated `compound_assign_kinds` entry, checked separately.
+fn is_compound_assign(table: &GrammarTable, node: Node<'_>, source: &str) -> bool {
+    if table.assign_operator_field.is_empty() {
+        return false;
+    }
+    node.child_by_field_name(table.assign_operator_field)
+        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+        .is_some_and(|op| op != "=")
+}
+
+/// Whether `node` is a bare identifier leaf whose text is one of `words` -
+/// used only for Kotlin's `break`/`continue`, which this grammar version
+/// tokenizes as plain `identifier`s rather than a dedicated node kind (see
+/// `GrammarTable::break_texts`). `words` is empty for every other language,
+/// so this can never misfire there.
+fn is_word(table: &GrammarTable, node: Node<'_>, source: &str, words: &[&str]) -> bool {
+    table.identifier_kinds.contains(&node.kind())
+        && node
+            .utf8_text(source.as_bytes())
+            .is_ok_and(|t| words.contains(&t))
 }
 
 /// Every call-kind node in `node`'s subtree, innermost first (so a nested
@@ -365,10 +551,7 @@ impl<'t> FnCtx<'t> {
             .table
             .member_access_kinds
             .contains(&node.kind())
-            .then(|| {
-                node.child_by_field_name(self.table.member_property_field)
-                    .map(|n| n.id())
-            })
+            .then(|| member_parts(self.table, node).1.map(|n| n.id()))
             .flatten();
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
@@ -411,12 +594,7 @@ impl<'t> FnCtx<'t> {
         let call_nodes = collect_call_nodes(self.table, node);
         let mut ids = Vec::with_capacity(call_nodes.len());
         for cn in call_nodes {
-            let callee = cn
-                .child_by_field_name(self.table.call_callee_field)
-                .map_or_else(
-                    || "<dynamic>".to_owned(),
-                    |c| callee_text(self.table, c, self.source),
-                );
+            let callee = call_callee(self.table, cn, self.source);
             let mut uses = Vec::new();
             self.scan_uses(cn, &mut uses);
             let temp = self.alloc_var();
@@ -465,6 +643,22 @@ impl<'t> FnCtx<'t> {
         }
     }
 
+    /// Pushes a structural node for `node` with no defs/uses/calls of its
+    /// own - for a leaf that only matters for its position in the CFG, not
+    /// its text (Kotlin's identifier-shaped bare `break`/`continue`).
+    fn push_bare(&mut self, node: Node<'t>) -> usize {
+        let line = line_of(node);
+        let label = snippet(node, self.source);
+        self.push(IrNode {
+            line: Some(line),
+            kind: NodeKind::Pure,
+            defs: Vec::new(),
+            uses: Vec::new(),
+            succs: Vec::new(),
+            label,
+        })
+    }
+
     /// Repeatedly unwraps a transparent wrapper kind to its `body` field, or
     /// its last named child when there is no such field.
     fn unwrap_wrapper(&self, mut node: Node<'t>) -> Node<'t> {
@@ -510,7 +704,7 @@ impl<'t> FnCtx<'t> {
     /// Lowers `node`'s named children directly, without the scope push a
     /// `block_kinds` dispatch would give it - used where a caller already
     /// owns the surrounding scope (for-loop pattern bindings, the module
-    /// root).
+    /// root, a class body's fields/methods).
     fn lower_block_children(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
         let mut cursor = node.walk();
         let children: Vec<Node<'t>> = node.named_children(&mut cursor).collect();
@@ -526,6 +720,22 @@ impl<'t> FnCtx<'t> {
             self.pop_scope();
         }
         exits
+    }
+
+    /// A `class_kinds` node at statement position: not a scope of its own
+    /// (see module docs), just its body's statements threaded straight into
+    /// the caller's open set - fields become module-scope bindings, methods
+    /// become module-scope `<fndecl>` bindings (their bodies were already
+    /// collected as their own `Type::method` `FunctionIr`s).
+    fn lower_class_body(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let Some(body) = field_or_kind(
+            node,
+            self.table.class_body_field,
+            self.table.class_body_kind,
+        ) else {
+            return open;
+        };
+        self.lower_block_children(body, open)
     }
 
     fn take_break(&mut self, node: usize) {
@@ -549,6 +759,9 @@ impl<'t> FnCtx<'t> {
         if t.block_kinds.contains(&kind) {
             return self.lower_block(node, open);
         }
+        if t.class_kinds.contains(&kind) {
+            return self.lower_class_body(node, open);
+        }
         if t.function_kinds.contains(&kind) {
             return self.lower_fn_decl(node, open);
         }
@@ -559,7 +772,8 @@ impl<'t> FnCtx<'t> {
             return self.lower_assign(node, open, true);
         }
         if t.assign_kinds.contains(&kind) {
-            return self.lower_assign(node, open, false);
+            let compound = is_compound_assign(t, node, self.source);
+            return self.lower_assign(node, open, compound);
         }
         if t.call_kinds.contains(&kind) {
             return self.lower_call_stmt(node, open);
@@ -595,7 +809,25 @@ impl<'t> FnCtx<'t> {
             self.take_continue(exit);
             return Vec::new();
         }
-        // Unrecognized construct (match/switch, try/except, item
+        // Kotlin's bare `break`/`continue` (no label) lexes as a plain
+        // `identifier`, not a dedicated node kind - going through `unit`
+        // here like the kind-based arms above would scan the node's own
+        // text as a *use* of a variable literally named "continue", since
+        // that's exactly what an identifier leaf normally means. Push a
+        // bare node instead: no calls to extract, nothing to use.
+        if is_word(t, node, self.source, t.break_texts) {
+            let exit = self.push_bare(node);
+            self.link(&open, exit);
+            self.take_break(exit);
+            return Vec::new();
+        }
+        if is_word(t, node, self.source, t.continue_texts) {
+            let exit = self.push_bare(node);
+            self.link(&open, exit);
+            self.take_continue(exit);
+            return Vec::new();
+        }
+        // Unrecognized construct (match/switch/when, try/except/catch, item
         // declarations, ...): a generic unit keeps the CFG connected
         // without pretending to understand it - see module docs.
         let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
@@ -622,9 +854,65 @@ impl<'t> FnCtx<'t> {
         vec![id]
     }
 
+    /// Resolves a `binding_kinds` node's pattern/value when it isn't the
+    /// declarator-list shape (`binding_declarator_field` empty): a field
+    /// lookup for either slot when the language fields at least one of them
+    /// (Rust, Python), else a kind-search for the pattern and "the last
+    /// named child, if it isn't the pattern itself" for the value (Kotlin's
+    /// `property_declaration`, entirely unfielded).
+    fn resolve_binding_pattern_value(
+        &self,
+        node: Node<'t>,
+    ) -> (Option<Node<'t>>, Option<Node<'t>>) {
+        let t = self.table;
+        if !t.binding_pattern_field.is_empty() || !t.binding_value_field.is_empty() {
+            let pattern = (!t.binding_pattern_field.is_empty())
+                .then(|| node.child_by_field_name(t.binding_pattern_field))
+                .flatten();
+            let value = (!t.binding_value_field.is_empty())
+                .then(|| node.child_by_field_name(t.binding_value_field))
+                .flatten();
+            return (pattern, value);
+        }
+        let pattern = first_child_of_kind(node, t.binding_pattern_kind);
+        let mut cursor = node.walk();
+        let last = node.named_children(&mut cursor).last();
+        let value = match (pattern, last) {
+            (Some(p), Some(l)) if p.id() != l.id() => Some(l),
+            (None, Some(l)) => Some(l),
+            _ => None,
+        };
+        (pattern, value)
+    }
+
     fn lower_binding(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
-        let pattern = node.child_by_field_name(self.table.binding_pattern_field);
-        let value = node.child_by_field_name(self.table.binding_value_field);
+        if !self.table.binding_declarator_field.is_empty() {
+            let mut cursor = node.walk();
+            let declarators: Vec<Node<'t>> = node
+                .children_by_field_name(self.table.binding_declarator_field, &mut cursor)
+                .collect();
+            let mut cur = open;
+            for decl in declarators {
+                let pattern = decl.child_by_field_name(self.table.binding_declarator_name_field);
+                let value = decl.child_by_field_name(self.table.binding_declarator_value_field);
+                cur = self.lower_one_binding(decl, pattern, value, cur);
+            }
+            return cur;
+        }
+        let (pattern, value) = self.resolve_binding_pattern_value(node);
+        self.lower_one_binding(node, pattern, value, open)
+    }
+
+    /// One binding statement: `span_node` supplies the line/label (a whole
+    /// `let`/property decl, or - for a declarator-list binding - just the
+    /// one declarator, mirroring `vikt-js`'s "one node per declarator").
+    fn lower_one_binding(
+        &mut self,
+        span_node: Node<'t>,
+        pattern: Option<Node<'t>>,
+        value: Option<Node<'t>>,
+        open: Vec<usize>,
+    ) -> Vec<usize> {
         let calls = value.map_or_else(Vec::new, |v| self.extract_calls(v));
         let mut uses = Vec::new();
         if let Some(v) = value {
@@ -636,8 +924,8 @@ impl<'t> FnCtx<'t> {
         if let Some(p) = pattern {
             self.scan_defs(p, true, &mut defs);
         }
-        let line = line_of(node);
-        let label = snippet(node, self.source);
+        let line = line_of(span_node);
+        let label = snippet(span_node, self.source);
         let id = self.push(IrNode {
             line: Some(line),
             kind: NodeKind::Pure,
@@ -738,18 +1026,22 @@ impl<'t> FnCtx<'t> {
     }
 
     fn lower_if(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
         let (Some(cond), Some(then_)) = (
-            node.child_by_field_name(self.table.if_cond_field),
-            node.child_by_field_name(self.table.if_then_field),
+            field_or_nth(node, t.if_cond_field, 0),
+            field_or_nth(node, t.if_then_field, 1),
         ) else {
             let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
             self.link(&open, entry);
             return vec![exit];
         };
-        let mut cursor = node.walk();
-        let alts: Vec<Node<'t>> = node
-            .children_by_field_name(self.table.if_alt_field, &mut cursor)
-            .collect();
+        let alts: Vec<Node<'t>> = if t.if_alt_field.is_empty() {
+            field_or_nth(node, "", 2).into_iter().collect()
+        } else {
+            let mut cursor = node.walk();
+            node.children_by_field_name(t.if_alt_field, &mut cursor)
+                .collect()
+        };
         self.lower_if_chain(cond, then_, &alts, open)
     }
 
@@ -789,9 +1081,10 @@ impl<'t> FnCtx<'t> {
     }
 
     fn lower_while(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
         let (Some(cond), Some(body)) = (
-            node.child_by_field_name(self.table.while_cond_field),
-            node.child_by_field_name(self.table.while_body_field),
+            field_or_nth(node, t.while_cond_field, 0),
+            field_or_last(node, t.while_body_field),
         ) else {
             let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
             self.link(&open, entry);
@@ -815,10 +1108,11 @@ impl<'t> FnCtx<'t> {
     /// def'ing the loop pattern and using the iterated expression, so every
     /// iteration is loop-carried by construction and the back edge is real.
     fn lower_for(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
         let (Some(pattern), Some(value), Some(body)) = (
-            node.child_by_field_name(self.table.for_pattern_field),
-            node.child_by_field_name(self.table.for_value_field),
-            node.child_by_field_name(self.table.for_body_field),
+            field_or_nth(node, t.for_pattern_field, 0),
+            field_or_nth(node, t.for_value_field, 1),
+            field_or_last(node, t.for_body_field),
         ) else {
             let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
             self.link(&open, entry);

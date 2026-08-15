@@ -13,6 +13,12 @@ thiserror = { workspace = true }
 tree-sitter = "=0.26.12"
 tree-sitter-rust = "=0.24.2"
 tree-sitter-python = "=0.25.0"
+tree-sitter-java = "=0.23.5"
+# `-ng` (tree-sitter-grammars/tree-sitter-kotlin, the community successor):
+# the original fwcd/tree-sitter-kotlin pins `tree-sitter <0.23` directly and
+# drags the whole workspace's runtime down to 0.22. Never surfaced in the
+# generator string - that's an implementation detail, not part of the API.
+tree-sitter-kotlin-ng = "=1.1.0"
 
 [lints]
 workspace = true
