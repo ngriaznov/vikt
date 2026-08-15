@@ -1,14 +1,16 @@
 //! Lowering-path selection shared between `analyze` and `calibrate`:
-//! `auto`/`primary`/`ast`, and the fallback probes each language's primary
-//! frontend needs to answer "is the primary even available here", not just
-//! "did it fail".
+//! `auto`/`primary`/`ast`.
 //!
-//! `auto` only ever falls back on the specific error shape that means
-//! "prerequisite missing" - `RsError::HelperMissing` for Rust, a `NotFound`
-//! `io::Error` for Python's interpreter spawn. Any other error (a real
-//! compile error, a `SyntaxError`) is reported as that failure and never
-//! silently swapped for a different lowering - masking a real bug as a
-//! fallback trigger would be worse than the bug.
+//! Only Rust keeps a primary-with-fallback split under `auto`: MIR measured
+//! well ahead of the AST lowering (rho 0.868 vs 0.601 on identical
+//! mutants), so the helper is used whenever present, and `auto` falls back
+//! only on the specific error shape that means "prerequisite missing"
+//! (`RsError::HelperMissing`) - a real compile error is reported as that
+//! failure, never silently swapped for a different lowering. Python scores
+//! via the AST unconditionally under `auto`: measured head-to-head it did
+//! at least as well as bytecode (0.651 vs 0.635) with no interpreter
+//! needed; `--lowering primary` keeps the bytecode path reproducible.
+//! See `eval/calibration/ast-fallback-comparison.md` for both numbers.
 
 use std::path::{Path, PathBuf};
 
@@ -21,9 +23,9 @@ use vikt_core::ir::FunctionIr;
 /// `analyze` and `calibrate` both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum Lowering {
-    /// Use the primary when its prerequisite is available, otherwise fall
-    /// back to tree-sitter - noted on stderr/stdout each time it happens,
-    /// never silent.
+    /// Rust: the MIR helper when present, tree-sitter otherwise (noted on
+    /// stderr each time, never silent). Python: tree-sitter always. The
+    /// per-language rationale is in the module docs.
     #[default]
     Auto,
     /// Require the primary; error exactly as it always has if it's
@@ -62,11 +64,16 @@ fn ast_single_file(input: &Path) -> Result<Lowered, Box<dyn std::error::Error>> 
 
 /// Lowers a `.py` file, `auto`/`primary`/`ast` as documented on [`Lowering`].
 ///
+/// `auto` IS the AST path for Python: measured head-to-head on identical
+/// mutants, the tree-sitter lowering scored at least as well as the
+/// bytecode one (`eval/calibration/ast-fallback-comparison.md`), needs no
+/// interpreter, and runs in-process. The bytecode path stays reachable via
+/// `--lowering primary` so that comparison remains reproducible.
+///
 /// # Errors
 ///
-/// Any lowering failure that isn't specifically "the interpreter is
-/// missing" under `auto` - a real `SyntaxError`, an I/O failure reading the
-/// file.
+/// Parse or I/O failures; under `primary`, additionally a missing
+/// interpreter.
 pub fn lower_python(
     input: &Path,
     python: &str,
@@ -74,21 +81,7 @@ pub fn lower_python(
 ) -> Result<Lowered, Box<dyn std::error::Error>> {
     match lowering {
         Lowering::Primary => primary_python(input, python),
-        Lowering::Ast => ast_single_file(input),
-        Lowering::Auto => match vikt_py::lower_file_with(input, python) {
-            Ok(lowered) => Ok(Lowered {
-                generator: "vikt-py/dis".to_owned(),
-                functions: lowered.functions,
-                profile: PanelProfile::Instruction,
-            }),
-            Err(vikt_py::PyError::Spawn(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!(
-                    "vikt: note: `{python}` not found; falling back to the tree-sitter lowering (pass --lowering primary to require {python})"
-                );
-                ast_single_file(input)
-            }
-            Err(e) => Err(e.into()),
-        },
+        Lowering::Auto | Lowering::Ast => ast_single_file(input),
     }
 }
 
@@ -99,22 +92,6 @@ fn primary_python(input: &Path, python: &str) -> Result<Lowered, Box<dyn std::er
         functions: lowered.functions,
         profile: PanelProfile::Instruction,
     })
-}
-
-/// Cheap up-front availability probe for `python`, used by a caller that
-/// would otherwise have to discover "the interpreter is missing" once per
-/// file in a loop (`calibrate`'s `score_tree`) - `lower_python` above
-/// instead catches it inline, which is fine for the single-file `analyze`
-/// path but noisy at tree scale.
-#[must_use]
-pub fn python_available(python: &str) -> bool {
-    std::process::Command::new(python)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
 }
 
 /// Lowers a `.js`/`.ts` file. `oxc` is the only lowering this frontend has
