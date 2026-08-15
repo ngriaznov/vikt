@@ -203,11 +203,13 @@ jobs:
 
             Each archive carries a `.sha256` alongside it.
 
-            `vikt` analyzes JVM `.class` files (Java/Kotlin), Python, and
-            JavaScript/TypeScript out of the box. Python lowering runs the
-            `python3` on your `PATH` (3.11+). Rust analysis additionally
-            needs the nightly MIR helper built once from the repository:
-            `cd tools/rust-lower && cargo build --release` — see the README.
+            `vikt` analyzes JVM `.class` files, Python, JavaScript/TypeScript,
+            Rust, and Java/Kotlin source out of the box, with no external
+            dependencies. Rust optionally upgrades to MIR-grade fidelity via
+            the nightly helper (`cd tools/rust-lower && cargo build --release`
+            — measured comparison in `eval/calibration/`); `--lowering`
+            selects a path explicitly. `python3` is needed only by
+            `vikt calibrate`'s Python mutation engine, never for scoring.
 
             **macOS:** these binaries are unsigned, so Gatekeeper will refuse
             the first run. Either `xattr -cr ./vikt` or right-click → Open
