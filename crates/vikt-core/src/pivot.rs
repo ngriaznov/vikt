@@ -1,142 +1,31 @@
-//! `pivot`: Birnbaum structural importance at `p = 1/2`, computed by
-//! reverse-mode (adjoint) differentiation of a noisy-OR delivery function over
-//! the dependence graph.
+//! Single-point-of-failure scorer: Birnbaum (1969) structural importance at
+//! `p = 1/2` — the fraction of other-component states in which this
+//! statement alone decides whether a correct value reaches an output;
+//! identically the absolute
+//! [Banzhaf index](https://en.wikipedia.org/wiki/Banzhaf_power_index) of
+//! the induced simple game. Computed by two linear adjoint passes over a
+//! noisy-OR delivery fixpoint on the dependence graph — the COP
+//! observability recursion from VLSI design-for-test — never by cut-set
+//! enumeration: `O(E)` against a #P-hard exact problem, accepting the
+//! standard independence approximation.
 //!
-//! # The model
+//! Load-bearing choices: noisy-OR rather than AND (AND collapses to a
+//! two-class answer, the failure that sank the mincut/flux scorers — see
+//! `eval/RESULTS-scorer-bakeoff.md`); `p = 1/2` is the maximum-entropy
+//! device that turns the derivative into a pure structural count (Barlow &
+//! Proschan), not a bug-rate estimate. The forward pass runs in the
+//! log-survival domain (`log1p`/`expm1`) so saturated fan-out keeps
+//! resolution; every divisor is `>= 1/2` by construction; [`SWEEPS`] is a
+//! fixed budget so output cannot depend on convergence order; a rootless
+//! closed cycle seeds from its root components ([`entry_set`]). Raw `B_v`
+//! decays roughly geometrically per dependence hop —
+//! [`rescale_for_display`] exists for exactly that, measured.
 //!
-//! Every statement `v` is a binary component: `x_v = 1` iff it computes the
-//! right value, with `P(x_v = 1) = p_v`. A *delivery* function `rho` says how
-//! likely a node's correct value is to reach an observable output:
-//!
-//! ```text
-//! rho_o = w_o                                    for o in OUTPUT (pinned, w_o = 1 by default)
-//! rho_i = 1 - PROD_{j in succ(i)} (1 - p_j * rho_j)   otherwise
-//! S     = rho_src                                where src -> every entry node
-//! ```
-//!
-//! `succ(i)` is the *dependence* successor set — the same producer -> consumer
-//! edges [`crate::graph::dependence_successors`] builds for the incumbent
-//! scorer's cones: a data def feeding a use, or a branch controlling a
-//! dependent statement. `S` is multilinear in every `p_v`, so its exact
-//! derivative is a finite difference — `v` perfect versus `v` dead — obtained
-//! in one linear pass rather than one ablation per node:
-//!
-//! ```text
-//! B_v = dS/dp_v = S|(p_v=1) - S|(p_v=0)
-//! ```
-//!
-//! Evaluated at `p_v = 1/2` for every node this is Birnbaum's (1969)
-//! structural importance: the fraction of the `2^(n-1)` states of the other
-//! components in which `v` alone decides delivery. Identically the absolute
-//! Banzhaf power index of the induced simple game.
-//!
-//! ## Why OR, not AND — the load-bearing modeling decision
-//!
-//! Reading `rho` as "the output is right only if *every* node in its backward
-//! cone is right" gives `S = PROD p_j`, hence `B_v = 2^-(n-1)` for every
-//! relevant node and `0` for the rest: a two-class answer, exactly the failure
-//! that sank the `mincut` and `flux` scorers (see
-//! `eval/RESULTS-scorer-bakeoff.md`). The noisy-OR reading above is what makes
-//! this graded: a statement backed by a parallel route is individually less
-//! pivotal than one with no alternative, and that is a genuinely global,
-//! non-local signal no weighted sum of local features (fan-in, fan-out,
-//! nesting depth, distance-to-return) can express, because two statements
-//! identical on every local feature get different `B_v` here whenever their
-//! redundancy structure differs.
-//!
-//! ## What stands in for failure probability
-//!
-//! Nothing is estimated or trained. `p_v = 1/2` is not a guess at how buggy a
-//! statement is. It is the point at which the Birnbaum derivative becomes a
-//! pure combinatorial count: the maximum-entropy prior over Boolean component
-//! states, and the standard probability-free device in this literature
-//! (Barlow & Proschan). `w_o`, the per-output weight (default `1`), is a
-//! statement about what counts as an output, not an estimate of anything.
-//!
-//! ## Algorithm: two linear adjoint passes
-//!
-//! 1. **Forward** (Kleene least fixpoint, Gauss-Seidel, sink-first order):
-//!    `rho = 0` everywhere, outputs pinned. Processing the strongly connected
-//!    components of the dependence graph in the order
-//!    [`crate::graph::strongly_connected`] returns them — "reverse
-//!    topological", i.e. a component's dependence-successors are always
-//!    already settled when it is reached — makes every acyclic region exact
-//!    in one sweep; only components that are an actual dependence cycle (a
-//!    loop-carried self-reference) iterate.
-//! 2. **Backward** (transposed linearization, forward topological order —
-//!    the reverse of pass 1's component order): `A_src = 1`, then
-//!    `A_j = SUM_{k in pred(j)} A_k * p_j * (1 - rho_k) / (1 - u_j)`, the
-//!    adjoint of the same fixpoint (this is the COP observability recursion
-//!    from VLSI design-for-test, run over a noisy-OR gate network instead of
-//!    logic gates).
-//! 3. **Score**: `B_v = rho_v * A_v / p_v`, i.e. `2 * rho_v * A_v` at
-//!    `p = 1/2` — verified against the unreduced pred-sum in
-//!    `birnbaum_identity_matches_long_form` below, which is a free
-//!    correctness check on the whole derivation.
-//!
-//! Both passes are contraction maps: the Jacobian row sum is the probability
-//! that *exactly one* successor transmits, `<= 1` always, and at `p = 1/2` it
-//! is bounded by `max_{d, u<=1/2} d*u*(1-u)^(d-1) <= 1/2`. [`SWEEPS`] = 64
-//! sweeps therefore land the residual at `<1e-12`, and it is a **fixed**
-//! budget rather than a tolerance test, so the output cannot depend on
-//! convergence order — see `CONVERGENCE` below.
-//!
-//! ## Numerical safety
-//!
-//! `u_v = p_v * rho_v <= 1/2` always (since `p_v = 1/2` and `rho_v <= 1`), so
-//! every divisor `1 - u_v >= 1/2`: nothing in the backward pass can divide by
-//! a value near zero. The forward pass is evaluated in the log-survival
-//! domain (`ell = SUM log1p(-u)`, `rho = -expm1(ell)`) so that a node with
-//! very high fan-out — many terms in the product — does not have its `rho`
-//! silently round to exactly `1.0` and lose resolution against its
-//! similarly-saturated neighbors; `log1p`/`expm1` are the standard pair for
-//! this because they stay accurate as their argument approaches zero, which
-//! `ln(1.0 + x)`/`exp(x) - 1` do not in plain form.
-//!
-//! That protects the *internal* fixpoint from underflowing to a false tie.
-//! It does not, on its own, protect the *reported* score: `B_v` itself
-//! decays close to geometrically per dependence hop, so on any real function
-//! larger than a handful of nodes the raw values are almost all under
-//! `0.01`, and this crate's artifact serializes scores to two decimal
-//! places. [`rescale_for_display`] exists to fix exactly that, measured, not
-//! hypothesized — see its doc comment for the number.
-//!
-//! ## Entry detection
-//!
-//! `ENTRY` nodes — [`crate::graph::dependence_successors`]' in-degree-zero
-//! nodes, i.e. parameters and captured reads with no dependence predecessor —
-//! are `src`'s successors. If the dependence graph has *no* in-degree-zero
-//! node at all (only possible when the entire reachable graph is one closed
-//! dependence cycle with no external root — pathological, but not
-//! impossible), every member of each root component (a component with no
-//! incoming inter-component edge) is treated as an entry instead, so `src`
-//! always has somewhere to seed and no node is silently starved of adjoint
-//! (see [`entry_set`] and failure mode 4 in the design brief this module
-//! implements).
-//!
-//! ## Complexity, and why no size cap is imposed
-//!
-//! Two linear passes, `O(K * (V + E))` with `K = 1` on the acyclic majority
-//! of components and `K = 64` only inside components that are genuine
-//! dependence cycles. This is polynomial (linear) in graph size by
-//! construction — there is no cut-set or path-set enumeration anywhere in
-//! this module — so requirement 6's size cap does not apply and none is
-//! imposed; see the `pivot_scales_linearly` timing test and the crate-level
-//! benchmark in the report for the measured constant.
-//!
-//! ## Known weaknesses (measured, not hypothetical — see the report)
-//!
-//! 1. **Reconvergence bias.** Independence between `p_v`'s is assumed, so a
-//!    diamond (a value read twice and recombined) has its reliability
-//!    overstated and the apex's true bottleneck status understated. One
-//!    directional, costs rank positions rather than destroying the signal.
-//! 2. **Geometric per-hop decay.** `rho` roughly halves per unary dependence
-//!    hop away from the nearest output, so a long straight-line body is
-//!    dominated by a symmetric hump a depth feature could imitate.
-//! 3. **Exact structural importance is #P-hard** in general because
-//!    reconvergent paths are correlated; this noisy-OR fixpoint treats them
-//!    as independent, exactly the approximation COP has made on hardware
-//!    netlists since 1984, in exchange for `O(E)` instead of exponential.
+//! Known weaknesses (measured — see the report): reconvergence bias
+//! (independence assumed, so diamonds overstate reliability and understate
+//! the apex's bottleneck status); the per-hop decay makes long
+//! straight-line bodies resemble a symmetric hump a depth feature could
+//! imitate.
 
 use std::collections::BTreeSet;
 

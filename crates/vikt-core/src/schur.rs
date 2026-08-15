@@ -1,129 +1,30 @@
-//! An alternative scorer built on Schur-complement deletion sensitivity.
+//! Deletion-sensitivity scorer: **how much less influence would the function
+//! deliver to its outputs if this statement were deleted?** Answered in
+//! closed form via the
+//! [Schur complement](https://en.wikipedia.org/wiki/Schur_complement)
+//! identity for principal-submatrix inverses over an
+//! [absorbing-chain](https://en.wikipedia.org/wiki/Absorbing_Markov_chain)
+//! fundamental matrix — not approximated by a proxy statistic.
 //!
-//! [`crate::importance::score_of`] — the `current` scorer — blends dependence-
-//! cone size, control-dominance weight, loop depth and effect-ness by fixed
-//! weights. This module answers a narrower, more literal question instead:
-//! **if this statement were deleted, how much less influence would the
-//! function deliver to its outputs?**: computed exactly, in closed form,
-//! rather than approximated by a proxy statistic.
+//! Model: nodes are instructions; edge `v -> u` when `u` reads `v`'s value
+//! (weight `1.0`) or `v` is a branch controlling `u` (`0.6`). Outputs `Ω`
+//! are the non-denylisted [`NodeKind::is_effect`] nodes and absorb; rows
+//! normalise by *total* out-weight so dead-ending influence is genuinely
+//! lost. With `M = I - Q` over the transient nodes,
+//! `score(v) = L_v·R_v/D_v` — upstream visit count times probability of
+//! ever reaching an output, corrected by the closed-form cycle-return term —
+//! which equals exactly the drop in total delivered influence when `v`'s
+//! row and column are deleted ([`tests::brute_force_matches_deletion`]
+//! checks this against literal re-solves). An `Ω` node scores what it
+//! received. Undamped; every nontrivial SCC is solved exactly as a dense
+//! block up to [`EXACT_SCC_CAP`]. Cost `O(E + Σ_C |C|³)`. Deterministic:
+//! `BTreeMap` order, fixed partial pivoting, fixed-sweep Jacobi fallback.
 //!
-//! # The network
-//!
-//! Nodes are instructions. A directed, weighted dependence edge `v -> u`
-//! exists when `u` reads a value `v` defines (weight `1.0`, from
-//! [`Graph::def_users`]) or when `v` is a branch controlling whether `u` runs
-//! (weight `0.6`, from [`Graph::ctrl_deps`]) — identical construction to the
-//! `dirichlet` scorer, and both channels share the two solves below.
-//!
-//! `Ω`, the outputs, is every [`NodeKind::is_effect`] node whose call target
-//! does not match the [`Denylist`] — the same "what counts as an effect"
-//! question [`crate::importance::analyze`] answers when it decides `EffectSite`
-//! vs `Denylisted`.
-//!
-//! Each row is normalised by that node's *total* raw out-weight — including
-//! weight to nodes that never reach `Ω` at all — so a node whose influence
-//! partly dead-ends genuinely has less than a full unit of eventual-absorption
-//! probability. `Ω` nodes are absorbing: once a walk reaches one, it stops.
-//!
-//! # The quantity
-//!
-//! Let `Q` be the transition matrix restricted to non-`Ω` ("transient")
-//! nodes and `b = Q·1_Ω` be each transient node's one-step probability of
-//! landing directly on some output. With `M = I - Q`:
-//!
-//! - `R = M⁻¹b` — probability node `v`'s influence *ever* reaches an output.
-//! - `L = 1ᵀM⁻¹` — expected number of times a uniform injection at every
-//!   node visits `v`.
-//! - `D_v = (M⁻¹)_{vv}` — expected number of returns to `v`; `1.0` unless
-//!   `v` sits in a cycle, in which case it is the closed-form loop-self-
-//!   reinforcement correction the incumbent's capped integer loop-depth term
-//!   only gestures at.
-//! - `F = 1ᵀM⁻¹b` — total delivered influence, summed with multiplicity over
-//!   every route.
-//!
-//! Deleting row and column `v` from `M` is exactly "delete this statement":
-//! whatever used to route through `v` is lost, not rerouted. The standard
-//! Schur-complement identity for a principal-submatrix inverse gives the new
-//! total in closed form without re-solving:
-//!
-//! ```text
-//! F(Ω∖v) = F - L_v · R_v / D_v
-//! ```
-//!
-//! so `score(v) = L_v·R_v/D_v` *is* "how much the whole changes if this part
-//! is removed" — not a proxy for it. [`tests::brute_force_matches_deletion`]
-//! checks this identity against literally deleting five nodes and re-solving
-//! from scratch, independently of the closed form.
-//!
-//! For an `Ω` node itself, "delete this output" means the mass that used to
-//! land there instead leaks, so its score is exactly what it received:
-//! `Σ_v L_v · P_{v,Ω}`, which sums to `F` over all outputs — the two halves
-//! of the function (interior statements, output statements) are scored by
-//! the same deletion-sensitivity question, just asked from either side of the
-//! absorbing boundary.
-//!
-//! # Cycles
-//!
-//! Run undamped (no tuned decay constant): `D_v` *is* the loop term, derived
-//! rather than parameterised. Every nontrivial strongly connected component
-//! of the `Q` graph is solved exactly, as a dense `|C|×|C|` block — see
-//! [`EXACT_SCC_CAP`] for the one place this stops being exact.
-//!
-//! # Algorithm and complexity
-//!
-//! 1. Reverse-reachability from `Ω` over the raw (unnormalised) edges drops
-//!    every node that cannot reach an output; those score `0.0` and never
-//!    enter the linear system. This is also what keeps `M` a nonsingular
-//!    M-matrix: every surviving transient node has strictly positive
-//!    eventual-leak-or-absorption mass.
-//! 2. Tarjan SCC of the surviving `Q` graph, condensed into a DAG.
-//! 3. `R` by one sweep over components in Tarjan's own emission order —
-//!    which is already reverse-topological, so a component's `Q`-successors
-//!    are always finished first (the same invariant [`Graph`]'s
-//!    `cone_sizes` relies on).
-//! 4. `L` by one sweep in the opposite order, over the transposed edges.
-//! 5. `D_v`: `1.0` with no work at all for every node outside a nontrivial
-//!    component; for the rest, one dense block inversion per component,
-//!    entirely local — it needs no information from the rest of the graph.
-//! 6. `score = L·R/D`, max-projected onto source lines by the shared line
-//!    projector, unchanged.
-//!
-//! Cost is `O(E + Σ_C |C|³)`. Steps 3-4 are `O(E)`. The only superlinear term
-//! is the per-component cube, which [`EXACT_SCC_CAP`] bounds — see there for
-//! the fallback and its honest cost.
-//!
-//! # Determinism
-//!
-//! Every map here is a `BTreeMap` or a `Vec` built by iterating one, edge
-//! lists are sorted by target id before any solve touches them, Gaussian
-//! elimination uses a fixed partial-pivot rule (largest magnitude, ties
-//! broken by lowest row index), and the iterative fallback is plain Jacobi
-//! with a fixed sweep order — never Gauss-Seidel, whose result depends on
-//! update order. Two runs over the same bytes are byte-identical.
-//!
-//! # Known weaknesses — read before trusting this on unfamiliar code
-//!
-//! - **`L_v` is a route-multiplicity count.** It inflates combinatorially in
-//!   dense fan-in regions independently of semantics: twelve temporaries
-//!   feeding one expression give that expression — and everything upstream of
-//!   it — a large `L` purely from the fan-in shape, not from doing anything
-//!   important. A trivial block that happens to assemble a long format string
-//!   from many small pieces can outrank a lean, load-bearing chain that has no
-//!   such fan-in. This is the failure this scorer's design brief predicted,
-//!   and nothing in the implementation below corrects for it.
-//! - **On a loop-free body, `D_v ≡ 1` for every node**, and the score
-//!   collapses to a plain `L_v · R_v` product — upstream reach times
-//!   downstream reach. That is a real signal, but it is not distinctively a
-//!   *zeta-function* signal once there is no cycle to make `D` interesting;
-//!   on acyclic code this scorer is answering a flow question a much simpler
-//!   statistic would answer about as well.
-//! - **`Ω` nodes with no dependence predecessors score `0.0`.** A `return`
-//!   whose value is a bare literal, with no upstream data or control
-//!   dependence at all, receives no delivered mass under this model and so
-//!   is scored as if deleting it were free. It is not free — it is the
-//!   function's only externally visible action — but this scorer only ever
-//!   asks "how much flow was routed through you", and a context-free effect
-//!   has none to lose.
+//! Known weaknesses: `L` is a route-multiplicity count and inflates in
+//! dense fan-in regions regardless of semantics; on a loop-free body
+//! `D ≡ 1` and the score collapses to upstream-reach × downstream-reach;
+//! an `Ω` node with no dependence predecessors (a bare-literal `return`)
+//! scores `0.0` despite being the function's visible action.
 
 // Single-letter names throughout (`q`, `b`, `r`, `l`, `d`, `f`, `m`, `n`) are
 // deliberate: they are the linear-algebra notation the module doc above

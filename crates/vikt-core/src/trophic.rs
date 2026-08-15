@@ -1,156 +1,27 @@
-//! An alternative scorer built on trophic levels, borrowed from food-web
-//! ecology.
+//! Derivation-depth scorer: **how many layers of transformation lie beneath
+//! this statement?** —
+//! [trophic levels](https://en.wikipedia.org/wiki/Trophic_level) (Levine,
+//! *Several Measures of Trophic Structure Applicable to Complex Food Webs*,
+//! 1980) over the dependence graph read as a food web: a statement
+//! consuming nothing is basal at `1.0`; otherwise
+//! `level(v) = 1 + weighted mean of the levels it reads` (data edges `1.0`,
+//! control edges `0.6` — the same graph [`crate::schur`] builds). Backward
+//! only: depth of derivation, never downstream reach.
 //!
-//! [`crate::importance::score_of`] — the `current` scorer — blends dependence-
-//! cone size, control-dominance weight, loop depth and effect-ness by fixed
-//! weights. [`crate::schur`] asks a deletion-sensitivity question. This
-//! module asks a third, narrower question: **how many layers of
-//! transformation lie beneath this statement?**
+//! Self-edges are dropped; each nontrivial SCC is solved exactly as one
+//! linear system (Gaussian elimination, fixed pivoting, uncapped by spec —
+//! `O(E + Σ_C |C|³)`). A cycle receiving no outside weight has no defined
+//! level — ecologically, a closed loop with no producer — and is assigned
+//! basal `1.0` ([`tests::isolated_cycle_with_no_input_is_basal`]). Levels
+//! min-max normalise to `0.0..=1.0` per function (all equal ⇒ `0.5`
+//! everywhere). Deterministic throughout.
 //!
-//! # The analogy
-//!
-//! In a food web (Levine, *Several Measures of Trophic Structure Applicable
-//! to Complex Food Webs*, 1980), *basal* species — plankton, plants — eat
-//! nothing and sit at trophic level `1`. Everything else's level is one more
-//! than the weighted mean level of what it eats: a herbivore grazing
-//! basal plants sits at level `2`; an apex predator that eats a mix of
-//! herbivores and other predators sits above all of them, pulled up more by
-//! the prey it eats more of.
-//!
-//! The statement graph is a food web read backwards. A statement that
-//! consumes nothing — a literal, a fresh read of a parameter, a call with no
-//! arguments — is basal: it derives from nothing already in the function, so
-//! it sits at level `1.0`. A statement built from basal values sits one
-//! level up. A statement built from a mix of basal and once-derived values
-//! sits higher still, pulled up more by the operands it depends on more
-//! heavily. This is a measure of **derivation depth**, not of downstream
-//! reach the way [`crate::schur`]'s `R`/`L` are, nor of influence share the
-//! way [`crate::graph::Graph::influence`] is: two statements can have
-//! identical fan-out and still differ here, because this only looks
-//! backward, at how much work already went into producing what they hold.
-//!
-//! # The graph
-//!
-//! Nodes are instructions. A directed, weighted edge `u -> v` ("`v` eats
-//! `u`") exists when `v` reads a value `u` defines (weight `1.0`, from
-//! [`Graph::uses_defs`] and [`Graph::defs`]) or when `u` is a branch
-//! controlling whether `v` runs (weight `0.6`, from [`Graph::ctrl_deps`]) —
-//! the same construction [`crate::schur`] uses, so the two scorers differ
-//! only in what they do with the same weighted graph. Self-edges (a node
-//! whose only in-edge is its own earlier iteration, via loop-carried
-//! reaching definitions) are dropped: a statement does not eat itself.
-//!
-//! # The quantity
-//!
-//! For node `v` with in-edges `{(u, w(u, v))}`:
-//!
-//! ```text
-//! level(v) = 1.0                                                  if v is basal (no in-edges)
-//! level(v) = 1.0 + (Σ_u w(u,v)·level(u)) / (Σ_u w(u,v))           otherwise
-//! ```
-//!
-//! Every node's level is bounded below by `1.0` (a weighted mean of levels
-//! that are themselves `>= 1.0` cannot itself be less than `1.0`, so adding
-//! `1.0` cannot produce anything less than `2.0` for a non-basal node — the
-//! floor is only ever touched by basal nodes themselves).
-//!
-//! # Cycles
-//!
-//! A loop's dependence graph is not acyclic — an accumulator both feeds and
-//! is fed by the next iteration's update — so `level` is not always
-//! computable node-by-node in a single forward pass. Every nontrivial
-//! strongly connected component is instead solved *as one system*: writing
-//! `S(v) = Σ_u w(u, v)` for the total in-weight of `v` (both the members
-//! that are inside the component and the ones outside it, whose levels are
-//! already known by the time the component is reached), the defining
-//! equation rearranges to a linear system in the component's unknowns:
-//!
-//! ```text
-//! S(v)·level(v) - Σ_{u in C} w(u,v)·level(u) = S(v) + Σ_{u not in C} w(u,v)·level(u)
-//! ```
-//!
-//! solved exactly by Gaussian elimination with partial pivoting over the
-//! `|C| x |C|` block.
-//!
-//! A component that receives no weight at all from outside itself — every
-//! in-edge of every member originates inside the same component, so nothing
-//! basal or already-solved ever feeds it — has no such solution: substituting
-//! `level ≡ L` for every member turns the system into `S(v)·L - S(v)·L =
-//! S(v)`, i.e. `0 = S(v)` for some `v`, which is false whenever any edge
-//! exists. (Concretely: a bare two-cycle `a <-> b` with no other input gives
-//! `level(a) = 1 + level(b)` and `level(b) = 1 + level(a)` simultaneously,
-//! which has no solution.) This is the ecological reading, too: a closed
-//! loop with no primary producer feeding it has no well-defined trophic
-//! level, because there is nothing at the bottom to measure depth *from*.
-//! Rather than leave the tier undefined, such a component's members are all
-//! assigned `1.0` — the same convention used for a basal node, since "no
-//! outside input" and "nothing to derive from" are the same situation read
-//! from two directions. [`tests::isolated_cycle_with_no_input_is_basal`]
-//! exercises exactly this case.
-//!
-//! # Algorithm and complexity
-//!
-//! 1. Build the weighted in-edge list per node: `O(E)`, `E` the number of
-//!    def-use and control-dependence edges.
-//! 2. Tarjan SCC over the *consumer* direction (`u -> v` meaning `v` depends
-//!    on `u`), reusing [`crate::graph::strongly_connected`] rather than
-//!    re-deriving it. Components come out in reverse topological order
-//!    (sinks first); this module walks them in the opposite order (sources —
-//!    basal nodes and their earliest dependents — first), the same reversal
-//!    [`crate::schur::compute_l`] uses to propagate the opposite direction
-//!    from [`crate::schur::compute_r`] over the identical component
-//!    ordering. `O(V + E)`.
-//! 3. One pass over components in that source-first order. A trivial
-//!    component (a single node with no self-edge, which is every node,
-//!    since self-edges are dropped at construction) is `O(in-degree)`: its
-//!    in-edges all originate outside the component and are therefore already
-//!    solved. A nontrivial component is one dense Gaussian elimination over
-//!    its own members, `O(|C|^3)`, needing nothing from the rest of the
-//!    graph beyond the already-solved levels feeding in from outside.
-//! 4. Min-max normalise every node's level into `0.0..=1.0` across the whole
-//!    function; if every level is equal (a function with no non-basal
-//!    statement, or exactly one node), every score is `0.5`.
-//!
-//! Total cost is `O(E + Sigma_C |C|^3)`. Unlike [`crate::schur`], there is no
-//! cap on the per-component cube: the spec calls for the *exact* linear
-//! solve unconditionally, so a pathological function whose entire dependence
-//! graph is one giant cycle costs `O(n^3)` here. Realistic loop-carried
-//! cycles are small (a handful of accumulator variables), so this is not
-//! observed in practice, but it is a real asymptotic difference from the
-//! capped-and-falls-back design in [`crate::schur`].
-//!
-//! # Determinism
-//!
-//! Every map here is a `BTreeMap`, edge lists are built by iterating one, and
-//! Gaussian elimination uses a fixed partial-pivot rule (largest magnitude,
-//! ties broken by lowest row index) — no iterative fallback, so there is no
-//! sweep-order dependency to worry about either. Two runs over the same
-//! bytes are byte-identical.
-//!
-//! # Known weaknesses — read before trusting this on unfamiliar code
-//!
-//! - **Dense fan-in inflates depth the way it inflates
-//!   [`crate::schur`]'s `L`.** A statement built from twelve operands, each
-//!   itself derived from something, is pulled up by the weighted *mean* of
-//!   those operands' levels — so unlike `schur`'s multiplicative blow-up,
-//!   more inputs at the same depth do not by themselves increase the level.
-//!   What does increase it is any single deeply-derived operand: one input
-//!   nested ten calls deep pulls the whole expression's level up by roughly
-//!   `1/n` of that depth, where `n` is the fan-in, so the *dilution* runs the
-//!   other way from `schur`. Neither direction is wrong; they are different
-//!   questions.
-//! - **A statement's level says nothing about whether it matters.** Trophic
-//!   level measures derivation depth, not downstream consequence: the last
-//!   line of a long, self-contained arithmetic expression that is then
-//!   discarded scores as high as one that feeds the function's only
-//!   `return`. This scorer answers "how much was built to make this", never
-//!   "does anything depend on this now" — that is what
-//!   [`crate::graph::Graph::influence`] and [`crate::schur`] are for.
-//! - **Control-dependence weight (`0.6`) is a fixed constant, not derived.**
-//!   It matches [`crate::schur`]'s choice so the two scorers are comparable,
-//!   but nothing about the ecology analogy picks that number; a different
-//!   constant would shift every branch-guarded statement's level by a
-//!   different amount without changing the analysis's qualitative shape.
+//! Known weaknesses: fan-in *dilutes* — one deeply derived operand pulls an
+//! expression up by roughly `1/n` of its depth, the opposite direction from
+//! [`crate::schur`]'s multiplicative blow-up; a level says nothing about
+//! whether anything depends on the value now (that is `schur`/influence
+//! territory); the `0.6` control weight is a convention shared with
+//! `schur`, not derived from the analogy.
 
 use std::collections::BTreeMap;
 

@@ -1,97 +1,22 @@
-//! An alternative scorer built on Horton–Strahler stream order.
+//! Convergence scorer: **where does this function's dataflow converge?** —
+//! the [Strahler number](https://en.wikipedia.org/wiki/Strahler_number)
+//! (Horton 1945, Strahler 1952) of the data-dependence graph: constants and
+//! parameters are order-1 springs; where two order-`k` derivations meet the
+//! stream continues as `k + 1`; a higher order absorbs lower tributaries
+//! unchanged. The highest-order statement is the one every major derivation
+//! chain has funneled into.
 //!
-//! [`crate::importance::score_of`] — the `current` scorer — blends dependence-
-//! cone size, control-dominance weight, loop depth and effect-ness by fixed
-//! weights. This module answers a narrower, structural question instead:
-//! **where does this function's dataflow converge?** — borrowing, literally,
-//! the ordering geomorphology uses to rank streams in a river network (Horton
-//! 1945, Strasser 1952 — usually cited as Strahler 1952, hence the name).
-//!
-//! # The analogy
-//!
-//! A river network's springs, the tributaries with no water flowing into
-//! them, are order 1. When two streams of *equal* order `k` meet, the
-//! confluence continues as order `k + 1`: two order-1 creeks make an order-2
-//! stream, two order-2 streams make an order-3 river. When a higher-order
-//! stream absorbs a lower-order tributary, nothing changes: the higher order
-//! wins outright, because one more small creek joining a river does not make
-//! it a bigger river. The network's mainstem, the Mississippi among its
-//! thousands of named creeks, is, by construction, wherever the order is
-//! highest: not the longest path, not the most tributaries by count, but the
-//! point every major branch has funneled into.
-//!
-//! In a function, dataflow is the water. Constants and parameters, values
-//! with nothing feeding them, are springs. A statement where two
-//! independently-derived values are combined is a confluence. The statement
-//! carrying the highest order is the one a reader would call the "real" work:
-//! not necessarily the busiest node, but the one every major derivation
-//! chain has, directly or transitively, funneled into.
-//!
-//! # Precise rule
-//!
-//! - **Edges are data edges only.** For every def `d` a node `v` reads (from
-//!   [`Graph::uses_defs`]), there is an edge `u -> v` where `u =
-//!   `[`Graph::defs`]`[d].node`, provided `u != v`. Parallel edges collapse
-//!   to one. This is this scorer's distinctive choice: control flow is the
-//!   valley walls that shape *where* the water goes, not the water itself,
-//!   so branches contribute no edges here — unlike `current`, which weighs
-//!   control-dominance directly, and unlike the `schur` scorer, which mixes
-//!   a control-dependence channel into the same graph as data. A predicate
-//!   matters to this scorer only through whatever data actually flows out of
-//!   it (its own inputs still count as edges *into* it, same as any node).
-//! - **Loops condense.** Every strongly connected component of the data
-//!   graph — mutually recursive locals inside a loop, most commonly — is a
-//!   single node in the confluence order: a stream doesn't gain order by
-//!   looping back on itself, and every member shares the component's order.
-//! - **Order of a component with no incoming inter-component edges is
-//!   `1`.** A component with a self-loop and nothing feeding it externally
-//!   is still a spring: internal edges never count toward its own order.
-//! - **Otherwise**, let `K` be the multiset of orders of its *distinct
-//!   upstream components* — one entry per component with an edge into this
-//!   one, not one per edge, so a component fed by three edges from the same
-//!   order-1 upstream component is fed by exactly one order-1 tributary, not
-//!   three. Let `m = max(K)`. The component's order is `m + 1` if `m`
-//!   occurs at least twice in `K` (two or more distinct order-`m` tributaries
-//!   truly converge here), otherwise `m` (one dominant tributary absorbs the
-//!   rest without being promoted).
-//!
-//! [`score`] is this order, min-max normalised across the whole function
-//! into `0.0..=1.0` — the highest-order statement(s) score `1.0`, the
-//! springs score `0.0`, and a function whose order never varies (every node
-//! equally deep, including the single-node case) scores every node `0.5`
-//! rather than manufacturing a fake ranking.
-//!
-//! # Algorithm and complexity
-//!
-//! 1. Build the data-edge adjacency directly from [`Graph::uses_defs`] and
-//!    [`Graph::defs`] — `O(e)`, where `e` is the number of def-use edges.
-//! 2. Tarjan SCC ([`crate::graph::strongly_connected`], reused rather than
-//!    re-derived) condenses it into a DAG — `O(n + e)`.
-//! 3. Distinct-predecessor-component sets are built once, as one `BTreeSet`
-//!    per component — `O(e log e)` worst case, from the set insertions.
-//! 4. Components are visited in a single pass over component ids from
-//!    highest to lowest. [`strongly_connected`] emits components in reverse
-//!    topological order with respect to the same edge direction this module
-//!    uses (a component's out-edges always point to an already-finished,
-//!    lower-numbered component — see `crate::graph::cone_sizes` for the
-//!    same invariant used the same way) — so walking ids downward visits
-//!    every upstream component before any of its downstream confluences,
-//!    with no separate topological sort. Each component's confluence rule is
-//!    then `O(1)` amortised, since every predecessor-component edge is
-//!    inspected exactly once across the whole pass.
-//! 5. Normalisation is one linear scan.
-//!
-//! Total cost is `O(n + e log e)` — linear up to the log factor from sorted
-//! deduplication, with no term worse than that anywhere in the pipeline.
-//!
-//! # Determinism
-//!
-//! Every edge set is a `BTreeSet` before it is ever iterated, the SCC pass is
-//! the same iterative, order-fixed Tarjan the rest of the crate already
-//! relies on, and the confluence rule only ever compares integers. There is
-//! no floating-point accumulation until the final normalisation, and that
-//! step is a single min/max scan over already-fixed integers. Two runs over
-//! the same bytes produce byte-identical output.
+//! Distinctive choices: data edges only — control flow is the valley walls,
+//! not the water, so predicates contribute no edges (their own inputs still
+//! count); SCCs condense to one node (no order gained by looping on
+//! yourself) and an externally unfed component is still a spring; upstream
+//! orders count once per distinct upstream *component*, not per edge, and
+//! promotion to `m + 1` requires at least two distinct order-`m`
+//! tributaries. [`score`] min-max normalises the order to `0.0..=1.0` per
+//! function; a function whose order never varies scores `0.5` everywhere
+//! rather than manufacturing a fake ranking. Cost `O(n + e log e)`;
+//! deterministic (`BTreeSet` edges, order-fixed Tarjan, integer-only until
+//! the final normalisation).
 
 use std::collections::BTreeSet;
 
