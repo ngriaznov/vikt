@@ -22,6 +22,7 @@
 #![allow(clippy::cast_precision_loss, clippy::doc_markdown)]
 
 mod calibrate;
+mod language;
 mod lowering;
 
 use std::collections::BTreeMap;
@@ -285,8 +286,9 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let lower_started = Instant::now();
-    let (generator, functions, note, profile) = match ext {
-        "class" => {
+    let kind = language::classify(ext);
+    let (generator, functions, note, profile) = match kind {
+        Some(language::InputKind::ClassFile) => {
             let bytes = std::fs::read(input)?;
             let lowered = vikt_jvm::lower_class(&bytes)?;
             let note = lowered.smap_stratum.as_ref().map(|stratum| {
@@ -312,19 +314,19 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 PanelProfile::Instruction,
             )
         }
-        "py" => {
+        Some(language::InputKind::Python) => {
             let lowered = lowering::lower_python(input, &args.python, args.lowering)?;
             (lowered.generator, lowered.functions, None, lowered.profile)
         }
-        "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => {
+        Some(language::InputKind::JsTs) => {
             let lowered = lowering::lower_js(input, args.lowering)?;
             (lowered.generator, lowered.functions, None, lowered.profile)
         }
-        "java" | "kt" | "kts" => {
+        Some(language::InputKind::JvmSource) => {
             let lowered = lowering::lower_ts_source(input)?;
             (lowered.generator, lowered.functions, None, lowered.profile)
         }
-        "rs" => {
+        Some(language::InputKind::Rust) => {
             let lowered = if is_crate_input {
                 // Whole package through cargo: every source file of the
                 // primary package, dependencies compiled but not analyzed.
@@ -334,9 +336,10 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             };
             (lowered.generator, lowered.functions, None, lowered.profile)
         }
-        other => {
+        None => {
             return Err(format!(
-                "unsupported input type {other:?}: expected a .class, .py, .js/.ts, .rs, .java or .kt file"
+                "unsupported input type {ext:?}: expected one of {}",
+                language::supported_extensions()
             )
             .into());
         }
