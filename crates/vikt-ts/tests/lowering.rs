@@ -211,6 +211,108 @@ fn rust_return_inside_branch_has_no_successor_and_no_fallthrough_to_increment() 
     );
 }
 
+const RUST_BARE_LOOP: &str = r"
+fn find_first(limit: i32) -> i32 {
+    let mut i = 0;
+    loop {
+        if i >= limit {
+            return -1;
+        }
+        if scan(i) {
+            return i;
+        }
+        i += 1;
+    }
+}
+";
+
+#[test]
+fn rust_bare_loop_models_returns_and_the_back_edge() {
+    let module = lower_source(Language::Rust, RUST_BARE_LOOP, "find_first.rs").expect("lowers");
+    let f = function(&module, "find_first");
+    f.validate().expect("valid graph");
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(
+        returns.len(),
+        2,
+        "both `return`s inside `loop {{ .. }}` must be modeled as Return nodes: {:?}",
+        kinds(f)
+    );
+    assert!(
+        returns.iter().all(|n| n.succs.is_empty()),
+        "a return has no successors, even from inside a bare loop"
+    );
+
+    let (branch_id, branch) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch))
+        .expect("the loop's head Branch node");
+    let increment = f
+        .nodes
+        .iter()
+        .position(|n| n.label.starts_with("i += 1"))
+        .expect("the increment statement");
+    assert!(
+        f.nodes[increment].succs.contains(&branch_id),
+        "the loop body must edge back to the head node"
+    );
+    assert!(
+        branch.succs.contains(&increment) || f.nodes.iter().any(|n| n.succs.contains(&increment)),
+        "the head node must reach into the loop body"
+    );
+}
+
+const RUST_LET_ELSE: &str = r"
+fn unwrap_or_bail(opt: Option<i32>) -> i32 {
+    let Some(x) = opt else {
+        return -1;
+    };
+    x + 1
+}
+";
+
+#[test]
+fn rust_let_else_diverging_block_keeps_its_return_visible() {
+    let module = lower_source(Language::Rust, RUST_LET_ELSE, "bail.rs").expect("lowers");
+    let f = function(&module, "unwrap_or_bail");
+    f.validate().expect("valid graph");
+
+    let binding = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("let Some(x)"))
+        .expect("the let-else binding node");
+    assert!(
+        matches!(binding.kind, NodeKind::Branch),
+        "a let-else binding is genuinely two-way, not a plain Pure unit: {:?}",
+        binding.kind
+    );
+
+    let ret = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("the else-block's `return -1` must survive as a Return node, not vanish");
+    assert!(ret.succs.is_empty());
+
+    let tail = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "x + 1")
+        .expect("the fallthrough tail expression");
+    assert!(
+        tail.uses.iter().any(|u| binding.defs.contains(u)),
+        "the tail still reads the pattern-bound `x` on the success path"
+    );
+}
+
 const RUST_CALLS: &str = r"
 fn compute(x: i32) -> i32 {
     let doubled = scale(x);
@@ -558,6 +660,36 @@ fn fine(x: i32) -> i32 {
 }
 
 #[test]
+fn a_module_scope_parse_error_is_reported_not_swallowed() {
+    // `BROKEN`'s initializer is missing entirely - an ERROR/MISSING node at
+    // top level, outside every function, so the per-function `has_error`
+    // stub (which only guards `fn_nodes`) never sees it. Padded with enough
+    // syntactically fine functions that the file-level bad/total ratio
+    // stays well under the 25% rejection threshold.
+    let source = r"
+const BROKEN: i32 = ;
+
+fn one(x: i32) -> i32 { x + 1 }
+fn two(x: i32) -> i32 { x + 2 }
+fn three(x: i32) -> i32 { x + 3 }
+fn four(x: i32) -> i32 { x + 4 }
+fn five(x: i32) -> i32 { x + 5 }
+";
+    let module = lower_source(Language::Rust, source, "mixed_module.rs")
+        .expect("file-level ratio is low enough to lower");
+    assert!(
+        module.diagnostics.iter().any(|d| d.function == "<module>"),
+        "a top-level parse error must be reported against <module>, not silently absorbed: {:?}",
+        module.diagnostics
+    );
+    let five = function(&module, "five");
+    assert!(
+        five.len() > 1,
+        "a syntactically fine function elsewhere in the file must still be fully lowered"
+    );
+}
+
+#[test]
 fn a_mostly_broken_file_fails_loudly() {
     let source = "fn @@@ ( { { { ] ) )) &&& !!!";
     let err = lower_source(Language::Rust, source, "garbage.rs")
@@ -694,6 +826,58 @@ fn java_enhanced_for_has_loop_carried_defs_and_a_back_edge() {
     assert!(
         cont.succs.contains(&branch_id),
         "continue must edge to the loop's Branch node, not fall through to total += x"
+    );
+}
+
+const JAVA_UNBRACED_FOR_BODY: &str = r"
+class Router {
+    void route(String[] items) {
+        for (String s : items) if (s.isEmpty()) skip(s); else handle(s);
+    }
+}
+";
+
+#[test]
+fn java_enhanced_for_with_unbraced_if_body_keeps_branches_mutually_exclusive() {
+    // `for (..) if (cond) skip(s); else handle(s);` has no braces around the
+    // for-each body at all - `body` is the `if_statement` itself, not a
+    // `block` wrapping it. Dispatching it as a sequence of its own children
+    // (the old bug) would splice the condition, `skip(s)` and `handle(s)`
+    // together as three unconditional back-to-back statements, running both
+    // branches every iteration instead of exactly one.
+    let module =
+        lower_source(Language::Java, JAVA_UNBRACED_FOR_BODY, "Router.java").expect("lowers");
+    let f = function(&module, "Router::route");
+    f.validate().expect("valid graph");
+
+    let branch_count = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Branch))
+        .count();
+    assert_eq!(
+        branch_count,
+        2,
+        "the unbraced `if` must still be lowered as its own Branch alongside the for-each's \
+         iterator-advance Branch, not spliced flat into the loop body: {:?}",
+        kinds(f)
+    );
+
+    let skip_id = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "skip"))
+        .expect("skip() call node");
+    let handle_id = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "handle"))
+        .expect("handle() call node");
+    let reaches_directly = |from: usize, to: usize| f.nodes[from].succs.contains(&to);
+    assert!(
+        !reaches_directly(skip_id, handle_id) && !reaches_directly(handle_id, skip_id),
+        "skip() and handle() sit on mutually exclusive branches - neither may edge straight \
+         into the other as if both ran unconditionally in sequence"
     );
 }
 
