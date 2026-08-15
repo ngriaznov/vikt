@@ -405,6 +405,60 @@ fn rust_tiering_prefers_the_effectful_tail_over_dead_bookkeeping() {
     );
 }
 
+const RUST_LET_IN_UNMODELED_MATCH: &str = r"
+fn pick(y: i32, cond: bool) -> i32 {
+    match cond {
+        true => {
+            let y = 99;
+            use_x(y);
+        }
+        false => {}
+    };
+    y
+}
+";
+
+#[test]
+fn rust_nested_let_in_unmodeled_match_shadows_outer_param() {
+    // `match` itself is unmodeled (falls back to a single opaque unit), but
+    // a `let` nested inside an arm must still shadow instead of resolving
+    // through to the outer parameter of the same name.
+    let module =
+        lower_source(Language::Rust, RUST_LET_IN_UNMODELED_MATCH, "pick.rs").expect("lowers");
+    let f = function(&module, "pick");
+    f.validate().expect("valid graph");
+
+    let param_def = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "<params>")
+        .and_then(|n| n.defs.first().copied())
+        .expect("y is the first param");
+
+    let match_unit_uses = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("match cond"))
+        .map(|n| n.uses.clone())
+        .expect("opaque match unit");
+    assert!(
+        !match_unit_uses.contains(&param_def),
+        "the arm's nested `let y` must not resolve to the outer parameter's VarId: \
+         {match_unit_uses:?} vs param {param_def:?}"
+    );
+
+    let tail_uses = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "y")
+        .map(|n| n.uses.clone())
+        .expect("tail expression node");
+    assert!(
+        tail_uses.contains(&param_def),
+        "the function's tail `y` must still read the outer parameter"
+    );
+}
+
 #[test]
 fn rust_lowering_is_deterministic() {
     let a = lower_source(Language::Rust, RUST_LOOP, "loop.rs").expect("lowers");
