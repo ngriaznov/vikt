@@ -342,19 +342,23 @@ every call as its own node, which is what lets the denylist isolate
 lowered unreachable, mirroring the measured exception-edge decision from the
 Python frontend.
 
-### The tree-sitter fallback
+### The lowering ladder
 
-Python and Rust fall back to a generic tree-sitter walker (`vikt-ts`,
-one walker plus a per-language grammar table) exactly when their primary's
-prerequisite is missing — no `python3`, no `vikt-rust-lower` — logged, never
-silent. Java and Kotlin *source* (`.java`/`.kt`, not just compiled `.class`)
-go through the same walker as their only lowering: new capability, not a
-choice. JS/TS never falls back; oxc stays the sole path. Every tree-sitter
-lowering is statement-granular, scores under `Statement`, and names its
-grammar in the sidecar's `generator` field (`vikt-ts/tree-sitter-rust`, etc.).
+Only Rust keeps a bytecode-class primary: the MIR helper measured well
+ahead of the AST lowering (rho 0.868 vs 0.601 on identical mutants), so
+`auto` uses it whenever `vikt-rust-lower` is present and falls back to
+tree-sitter otherwise — logged, never silent. Everything else scores
+through an AST: JS/TS via oxc as always, and Python, Java and Kotlin
+source via a generic tree-sitter walker (`vikt-ts`, one walker plus a
+per-language grammar table). Python's bytecode lowering measured *behind*
+the AST head-to-head (0.635 vs 0.651), so the AST is its default with no
+interpreter needed; `.class` files still analyze as bytecode, and
+`.java`/`.kt` source is a new capability. Every tree-sitter lowering is
+statement-granular, scores under `Statement`, and names its grammar in the
+sidecar's `generator` field (`vikt-ts/tree-sitter-rust`, etc.).
 `--lowering <auto|primary|ast>`, on `analyze` and `calibrate` both: `auto`
-(default) probes and falls back, `primary` requires and errors, `ast` forces
-tree-sitter. Measured quality against each primary lives in
+(default) as above, `primary` requires the bytecode/MIR path and errors
+without it, `ast` forces tree-sitter. The measurements live in
 `eval/calibration/ast-fallback-comparison.md`.
 
 ## Usage

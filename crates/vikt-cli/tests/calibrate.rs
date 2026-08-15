@@ -393,7 +393,7 @@ fn emit_dataset_writes_consistent_jsonl() {
         let panel = row["panel"].as_f64().expect("panel is a number");
         assert!((0.0..=1.0).contains(&panel));
         assert_eq!(row["language"], "python");
-        assert_eq!(row["profile"], "instruction");
+        assert_eq!(row["profile"], "statement");
 
         // Additive fields: present regardless of `--scope`, which this run
         // never passed.

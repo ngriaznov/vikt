@@ -578,25 +578,17 @@ fn score_by_majority(
     }
 }
 
-/// Whether `lang` should score through the tree-sitter fallback rather than
-/// its primary frontend, deciding once up front rather than discovering
-/// unavailability once per file in [`score_tree`]'s loop. JavaScript has no
-/// primary/fallback split at all - `vikt-js`'s oxc engine is the only
-/// lowering it has ever had - so this is always `false` for it regardless
-/// of `lowering`.
-fn use_tree_sitter(lang: Language, python: &str, lowering: Lowering) -> bool {
+/// Whether `lang` should score through the tree-sitter lowering rather than
+/// a primary frontend. Python's answer is yes unless `--lowering primary`
+/// explicitly asks for the bytecode path — the AST measured at least as
+/// well on identical mutants (`eval/calibration/ast-fallback-comparison.md`)
+/// and needs no interpreter for scoring (mutation still runs through
+/// `python3` either way). JavaScript has no primary/fallback split at all -
+/// `vikt-js`'s oxc engine is the only lowering it has ever had.
+fn use_tree_sitter(lang: Language, lowering: Lowering) -> bool {
     match (lang, lowering) {
-        (Language::Python, Lowering::Ast) => true,
+        (Language::Python, Lowering::Auto | Lowering::Ast) => true,
         (Language::JavaScript, _) | (Language::Python, Lowering::Primary) => false,
-        (Language::Python, Lowering::Auto) => {
-            let available = lowering::python_available(python);
-            if !available {
-                println!(
-                    "calibrate: `{python}` not found; scoring Python sources via the tree-sitter fallback (pass --lowering primary to require {python})"
-                );
-            }
-            !available
-        }
         // Rust lowers whole packages, not files — see `score_crate`, which
         // makes this decision for itself against `vikt_rs::lower_crate`'s
         // own error rather than a separate up-front probe.
@@ -617,7 +609,7 @@ fn score_tree(
     python: &str,
     lowering: Lowering,
 ) -> ScoreOutcome {
-    let via_ts = use_tree_sitter(lang, python, lowering);
+    let via_ts = use_tree_sitter(lang, lowering);
     let profile = if via_ts {
         PanelProfile::Statement
     } else {
