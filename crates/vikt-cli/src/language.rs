@@ -421,6 +421,33 @@ mod tests {
         assert!(Language::Rust.is_synthetic("<module>", true));
     }
 
+    /// Contextual naming (`vikt-js`'s `context_name`/`enclosing_name`,
+    /// `vikt-ts`'s `declared_name`) derives real names like `createStyler`
+    /// and qualified anonymous names like `outer.<anon@12>` for closures
+    /// that used to surface as `<fn@N>`/`{closure#N}`/`<lambda>`. Neither
+    /// form may ever be swept up by a synthetic-name filter meant only for
+    /// the frontend's own overlapping-extent wrapper names: JavaScript's
+    /// arm ignores name content entirely (every JS/TS function, named,
+    /// derived or qualified-anonymous, keeps its own non-overlapping
+    /// extent), and the qualified `<anon@N>` spelling itself would trip
+    /// Python's `contains('<')` rule if Python's frontend ever produced it -
+    /// it never does, `<lambda>`/`<listcomp>`/`<locals>` come from CPython's
+    /// own `co_qualname` and `vikt-ts`'s Python table, not from this
+    /// derivation.
+    #[test]
+    fn derived_and_qualified_anonymous_names_are_never_synthetic() {
+        for via_ts in [false, true] {
+            assert!(!Language::JavaScript.is_synthetic("createStyler", via_ts));
+            assert!(!Language::JavaScript.is_synthetic("outer.<anon@12>", via_ts));
+        }
+        // The Rust ts-fallback path (`via_ts: true`) never treats a closure
+        // as synthetic regardless of name, so a declared name reached
+        // through `vikt-ts`'s `declared_name` is covered by the same
+        // guarantee `rust_closure_synthetic_only_under_the_mir_primary`
+        // pins for the fallback synthetic form.
+        assert!(!Language::Rust.is_synthetic("add", true));
+    }
+
     /// Rust and Go keep a sensible `--build-cmd` default; Java and Kotlin
     /// have none, which is what makes the flag required for them in
     /// `calibrate`.

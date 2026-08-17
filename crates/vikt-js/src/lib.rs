@@ -27,6 +27,18 @@
 //! (`Math`, `console`, anything ambient) get per-name variable ids so flows
 //! through globals are still flows.
 //!
+//! # Function naming
+//!
+//! A named function expression or declaration keeps its own name. Anything
+//! else - an arrow, or a `function` with no name - borrows one from its
+//! immediate syntactic context when the context provides one: a `const`/
+//! `let` target, an assignment target, an object property (including a
+//! shorthand method), or a class field or method. Failing that, it is
+//! qualified by its nearest named enclosing function (`outer.<anon@LINE>`)
+//! so a bare callback or an IIFE still reads in context; a module-level
+//! anonymous with no enclosing function keeps the bare `<fn@LINE>` form.
+//! See [`infer_name`] and [`context_name`].
+//!
 //! # Closure captures
 //!
 //! A unit whose span contains a nested function - `const f = () => ...`, a
@@ -69,6 +81,7 @@ use oxc_ast::ast::{self, Expression, Statement};
 use oxc_parser::Parser;
 use oxc_semantic::{Semantic, SemanticBuilder};
 use oxc_span::{GetSpan, SourceType, Span};
+use oxc_syntax::node::NodeId;
 use thiserror::Error;
 use vikt_core::ir::{CallOpacity, FunctionId, FunctionIr, Node, NodeKind, VarId};
 
@@ -268,10 +281,8 @@ impl<'a> Facts<'a> {
                 }),
                 AstKind::Function(f) => {
                     if let Some(body) = &f.body {
-                        let name = f
-                            .id
-                            .as_ref()
-                            .map_or_else(|| anon_name(f.span, source), |id| id.name.to_string());
+                        let own = f.id.as_ref().map(|id| id.name.to_string());
+                        let name = infer_name(node.id(), f.span, own, semantic, source);
                         functions.push(FnFact {
                             name,
                             line: line_of_offset(f.span.start, source),
@@ -291,8 +302,9 @@ impl<'a> Facts<'a> {
                             None => continue,
                         },
                     };
+                    let name = infer_name(node.id(), f.span, None, semantic, source);
                     functions.push(FnFact {
-                        name: anon_name(f.span, source),
+                        name,
                         line: line_of_offset(f.span.start, source),
                         body: b,
                         param_defs: param_keys(f.span, body_span, &bindings),
@@ -420,6 +432,85 @@ fn line_of_offset(off: u32, source: &str) -> u32 {
 
 fn anon_name(span: Span, source: &str) -> String {
     format!("<fn@{}>", line_of_offset(span.start, source))
+}
+
+/// A function-like's name: its own binding (`f.id`, `None` for an arrow or
+/// an unnamed function expression) if it has one; else whatever the
+/// immediate syntactic context provides (see [`context_name`]); else
+/// `parent.<anon@LINE>`, qualified by the nearest named enclosing function
+/// so a bare callback or an IIFE still reads in context; else, for a
+/// module-level anonymous with no enclosing function at all, the bare
+/// `<fn@LINE>` form.
+fn infer_name(
+    node_id: NodeId,
+    span: Span,
+    own: Option<String>,
+    semantic: &Semantic<'_>,
+    source: &str,
+) -> String {
+    if let Some(name) = own {
+        return name;
+    }
+    if let Some(name) = context_name(node_id, semantic) {
+        return name;
+    }
+    match enclosing_name(node_id, semantic, source) {
+        Some(parent) => format!("{parent}.<anon@{}>", line_of_offset(span.start, source)),
+        None => anon_name(span, source),
+    }
+}
+
+/// A name borrowed from the immediate parent that binds this function-like
+/// node: a `const`/`let` declarator (`const f = () => …` → `f`), a plain or
+/// member assignment (`x = function(){}` → `x`, `obj.prop = …` → `prop`),
+/// an object-literal property or shorthand method (`{ prop: () => … }`,
+/// `{ prop() {} }`), or a class field or method. `None` when the function
+/// sits in none of these shapes - a bare callback argument, an IIFE, a
+/// `return`, an array element, ...
+fn context_name(node_id: NodeId, semantic: &Semantic<'_>) -> Option<String> {
+    match semantic.nodes().parent_kind(node_id) {
+        AstKind::VariableDeclarator(d) => match &d.id {
+            ast::BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+            _ => None,
+        },
+        AstKind::AssignmentExpression(a) => assignment_target_name(&a.left),
+        AstKind::ObjectProperty(p) => p.key.static_name().map(|n| n.into_owned()),
+        AstKind::PropertyDefinition(p) => p.key.static_name().map(|n| n.into_owned()),
+        AstKind::MethodDefinition(m) => m.key.static_name().map(|n| n.into_owned()),
+        _ => None,
+    }
+}
+
+/// The bound name of a simple assignment target: a bare identifier
+/// (`x = …`) or the trailing property of a static member write
+/// (`obj.prop = …`). A computed (`obj[expr] = …`) or destructuring target
+/// has no statically-known name.
+fn assignment_target_name(target: &ast::AssignmentTarget<'_>) -> Option<String> {
+    match target {
+        ast::AssignmentTarget::AssignmentTargetIdentifier(id) => Some(id.name.to_string()),
+        ast::AssignmentTarget::StaticMemberExpression(m) => Some(m.property.name.to_string()),
+        _ => None,
+    }
+}
+
+/// The nearest enclosing function-like node's own name, computed the same
+/// way [`infer_name`] would for it - so a doubly-anonymous closure still
+/// chains (`outer.<anon@N>.<anon@M>`) instead of losing context. `None` at
+/// module scope, where there is no enclosing function to qualify with.
+fn enclosing_name(node_id: NodeId, semantic: &Semantic<'_>, source: &str) -> Option<String> {
+    semantic
+        .nodes()
+        .ancestors_enumerated(node_id)
+        .find_map(|(id, node)| match node.kind() {
+            AstKind::Function(f) => {
+                let own = f.id.as_ref().map(|b| b.name.to_string());
+                Some(infer_name(id, f.span, own, semantic, source))
+            }
+            AstKind::ArrowFunctionExpression(f) => {
+                Some(infer_name(id, f.span, None, semantic, source))
+            }
+            _ => None,
+        })
 }
 
 fn callee_text(e: &Expression<'_>, source: &str) -> String {

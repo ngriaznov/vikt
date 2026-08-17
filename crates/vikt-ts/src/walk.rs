@@ -217,11 +217,162 @@ fn enclosing_fn_node<'t>(table: &'static GrammarTable, node: Node<'t>) -> Option
     None
 }
 
-/// A closure's synthetic name: `table.closure_name_format` with `{owner}`
-/// and `{idx}` substituted - see the field's docs. `counts` is keyed by the
-/// enclosing function/closure node's id (or `usize::MAX` for a closure with
-/// no enclosing function at all, e.g. a top-level `<module>` initializer),
-/// giving each owner its own 0-based counter in appearance order.
+/// `node`'s pattern/value children under a `binding_kinds` (or
+/// `binding_kinds2`) shape - the table-driven half of `lower_binding`,
+/// usable before any `FnCtx` exists (naming a closure happens in
+/// `lower_module`, ahead of lowering its body). See
+/// `FnCtx::resolve_binding_pattern_value`, which delegates here.
+fn binding_pattern_value<'t>(
+    table: &'static GrammarTable,
+    node: Node<'t>,
+) -> (Option<Node<'t>>, Option<Node<'t>>) {
+    if table.binding_kinds2.contains(&node.kind()) {
+        // Go alone needs a second pattern/value field pair on the same
+        // table - see `GrammarTable::binding_kinds2`'s docs.
+        let pattern = (!table.binding_pattern_field2.is_empty())
+            .then(|| node.child_by_field_name(table.binding_pattern_field2))
+            .flatten();
+        let value = (!table.binding_value_field2.is_empty())
+            .then(|| node.child_by_field_name(table.binding_value_field2))
+            .flatten();
+        return (pattern, value);
+    }
+    if !table.binding_pattern_field.is_empty() || !table.binding_value_field.is_empty() {
+        let pattern = (!table.binding_pattern_field.is_empty())
+            .then(|| node.child_by_field_name(table.binding_pattern_field))
+            .flatten();
+        let value = (!table.binding_value_field.is_empty())
+            .then(|| node.child_by_field_name(table.binding_value_field))
+            .flatten();
+        return (pattern, value);
+    }
+    let pattern = first_child_of_kind(node, table.binding_pattern_kind);
+    let mut cursor = node.walk();
+    let last = node.named_children(&mut cursor).last();
+    let value = match (pattern, last) {
+        (Some(p), Some(l)) if p.id() != l.id() => Some(l),
+        (None, Some(l)) => Some(l),
+        _ => None,
+    };
+    (pattern, value)
+}
+
+/// Identifier leaf texts under `node`, skipping a member-access node's
+/// property/attribute position (never a variable) and any nested function's
+/// or closure's body. The table-driven half of
+/// `FnCtx::collect_identifier_texts_excluding`, which delegates here -
+/// factored out so closure naming (`declared_name`, run in `lower_module`
+/// ahead of any `FnCtx`) can reuse the exact same identifier extraction the
+/// lowering itself uses for a binding pattern.
+fn identifier_texts_excluding<'t>(
+    table: &'static GrammarTable,
+    source: &'t str,
+    node: Node<'t>,
+    skip: Option<usize>,
+    out: &mut Vec<&'t str>,
+) {
+    if Some(node.id()) == skip {
+        return;
+    }
+    if table.identifier_kinds.contains(&node.kind()) {
+        if let Ok(text) = node.utf8_text(source.as_bytes()) {
+            out.push(text);
+        }
+        return;
+    }
+    if is_function_like(table, node.kind()) {
+        return;
+    }
+    let skip_id = table
+        .member_access_kinds
+        .contains(&node.kind())
+        .then(|| member_parts(table, node).1.map(|n| n.id()))
+        .flatten();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if skip_id == Some(child.id()) || Some(child.id()) == skip {
+            continue;
+        }
+        identifier_texts_excluding(table, source, child, skip, out);
+    }
+}
+
+/// The single identifier leaf under `node`, or `None` when it names zero or
+/// more than one - a destructuring/tuple binding target doesn't get a
+/// synthetic name misattributed to just one of its parts.
+fn sole_identifier(table: &'static GrammarTable, node: Node<'_>, source: &str) -> Option<String> {
+    let mut names = Vec::new();
+    identifier_texts_excluding(table, source, node, None, &mut names);
+    match names.as_slice() {
+        [name] => Some((*name).to_owned()),
+        _ => None,
+    }
+}
+
+/// A closure's name from the syntax immediately holding it, read through
+/// the same table-driven shape `lower_binding`/`lower_assign` use to lower
+/// the statement itself: a variable/property binding's pattern (`let f = ||
+/// …` → `f`), the declarator-list shape's own name field (Java's
+/// `T f = () -> …`, `field_declaration` alike), or a plain or member
+/// assignment's left side (`x = function(){}` → `x`, `obj.prop = …` →
+/// `prop`). `None` when the closure sits in none of these shapes - a bare
+/// callback argument, an IIFE, a `return`, ... - or the target isn't a
+/// single plain identifier.
+fn declared_name(table: &'static GrammarTable, fnode: Node<'_>, source: &str) -> Option<String> {
+    let parent = fnode.parent()?;
+
+    // The declarator-list shape (Java's `local_variable_declaration`/
+    // `field_declaration`): the closure's immediate parent is one
+    // declarator inside the binding node, not the binding node itself.
+    if !table.binding_declarator_field.is_empty() {
+        let is_value = parent
+            .child_by_field_name(table.binding_declarator_value_field)
+            .is_some_and(|v| v.id() == fnode.id());
+        if is_value
+            && parent
+                .parent()
+                .is_some_and(|gp| table.binding_kinds.contains(&gp.kind()))
+        {
+            let name = parent.child_by_field_name(table.binding_declarator_name_field)?;
+            return sole_identifier(table, name, source);
+        }
+    }
+
+    if table.binding_kinds.contains(&parent.kind()) || table.binding_kinds2.contains(&parent.kind())
+    {
+        let (pattern, value) = binding_pattern_value(table, parent);
+        if value.is_some_and(|v| v.id() == fnode.id()) {
+            return pattern.and_then(|p| sole_identifier(table, p, source));
+        }
+        return None;
+    }
+
+    if table.assign_kinds.contains(&parent.kind()) {
+        let is_value = parent
+            .child_by_field_name(table.assign_right_field)
+            .is_some_and(|r| r.id() == fnode.id());
+        if !is_value {
+            return None;
+        }
+        let left = parent.child_by_field_name(table.assign_left_field)?;
+        return if is_member_target(table, left) {
+            member_parts(table, left)
+                .1
+                .and_then(|p| sole_identifier(table, p, source))
+        } else {
+            sole_identifier(table, left, source)
+        };
+    }
+
+    None
+}
+
+/// A closure's name: [`declared_name`] when the syntax gives it one, else
+/// `table.closure_name_format` with `{owner}` and `{idx}` substituted - see
+/// the field's docs. `counts` is keyed by the enclosing function/closure
+/// node's id (or `usize::MAX` for a closure with no enclosing function at
+/// all, e.g. a top-level `<module>` initializer), giving each owner its own
+/// 0-based counter in appearance order.
 fn closure_name(
     table: &'static GrammarTable,
     fnode: Node<'_>,
@@ -229,6 +380,9 @@ fn closure_name(
     names: &BTreeMap<usize, String>,
     counts: &mut BTreeMap<usize, u32>,
 ) -> String {
+    if let Some(name) = declared_name(table, fnode, source) {
+        return name;
+    }
     let scope = enclosing_fn_node(table, fnode);
     let owner = scope
         .and_then(|n| names.get(&n.id()).cloned())
@@ -796,31 +950,7 @@ impl<'t> FnCtx<'t> {
         skip: Option<usize>,
         out: &mut Vec<&'t str>,
     ) {
-        if Some(node.id()) == skip {
-            return;
-        }
-        if self.table.identifier_kinds.contains(&node.kind()) {
-            if let Ok(text) = node.utf8_text(self.source.as_bytes()) {
-                out.push(text);
-            }
-            return;
-        }
-        if is_function_like(self.table, node.kind()) {
-            return;
-        }
-        let skip_id = self
-            .table
-            .member_access_kinds
-            .contains(&node.kind())
-            .then(|| member_parts(self.table, node).1.map(|n| n.id()))
-            .flatten();
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            if skip_id == Some(child.id()) || Some(child.id()) == skip {
-                continue;
-            }
-            self.collect_identifier_texts_excluding(child, skip, out);
-        }
+        identifier_texts_excluding(self.table, self.source, node, skip, out);
     }
 
     /// Every `binding_kinds` node's pattern names anywhere under `node`,
@@ -1204,36 +1334,7 @@ impl<'t> FnCtx<'t> {
         &self,
         node: Node<'t>,
     ) -> (Option<Node<'t>>, Option<Node<'t>>) {
-        let t = self.table;
-        if t.binding_kinds2.contains(&node.kind()) {
-            // Go alone needs a second pattern/value field pair on the same
-            // table - see `GrammarTable::binding_kinds2`'s docs.
-            let pattern = (!t.binding_pattern_field2.is_empty())
-                .then(|| node.child_by_field_name(t.binding_pattern_field2))
-                .flatten();
-            let value = (!t.binding_value_field2.is_empty())
-                .then(|| node.child_by_field_name(t.binding_value_field2))
-                .flatten();
-            return (pattern, value);
-        }
-        if !t.binding_pattern_field.is_empty() || !t.binding_value_field.is_empty() {
-            let pattern = (!t.binding_pattern_field.is_empty())
-                .then(|| node.child_by_field_name(t.binding_pattern_field))
-                .flatten();
-            let value = (!t.binding_value_field.is_empty())
-                .then(|| node.child_by_field_name(t.binding_value_field))
-                .flatten();
-            return (pattern, value);
-        }
-        let pattern = first_child_of_kind(node, t.binding_pattern_kind);
-        let mut cursor = node.walk();
-        let last = node.named_children(&mut cursor).last();
-        let value = match (pattern, last) {
-            (Some(p), Some(l)) if p.id() != l.id() => Some(l),
-            (None, Some(l)) => Some(l),
-            _ => None,
-        };
-        (pattern, value)
+        binding_pattern_value(self.table, node)
     }
 
     fn lower_binding(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {

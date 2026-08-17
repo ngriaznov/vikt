@@ -547,14 +547,16 @@ fn outer(base: i32) -> i32 {
 ";
 
 #[test]
-fn rust_closure_becomes_its_own_brace_qualified_function() {
+fn rust_closure_takes_its_let_binding_name() {
     let module = lower_source(Language::Rust, RUST_CLOSURE, "outer.rs").expect("lowers");
+    // `let add = |x| ...` names the closure from its binding, the same way
+    // a source-named function would - not the brace-qualified synthetic
+    // form, which only applies when nothing in the syntax names it.
     let closure = module
         .functions
         .iter()
-        .find(|f| f.id.name.contains("{closure#"))
-        .expect("the closure must lower as its own FunctionIr");
-    assert_eq!(closure.id.name, "outer::{closure#0}");
+        .find(|f| f.id.name == "add")
+        .expect("the closure must lower as its own FunctionIr named after its `let` binding");
     closure.validate().expect("valid graph");
 
     // `x` is the closure's own parameter; `base` and `helper` are captured
@@ -943,14 +945,15 @@ def outer(base):
 ";
 
 #[test]
-fn python_lambda_becomes_its_own_angle_qualified_function() {
+fn python_lambda_takes_its_assignment_target_name() {
     let module = lower_source(Language::Python, PY_CLOSURE, "outer.py").expect("lowers");
-    let lam = module
-        .functions
-        .iter()
-        .find(|f| f.id.name.contains("<lambda>"))
-        .expect("the lambda must lower as its own FunctionIr");
-    assert_eq!(lam.id.name, "outer.<locals>.<lambda>");
+    // `add = lambda x: ...` names the lambda from its assignment target -
+    // not the angle-qualified synthetic form, which only applies when
+    // nothing in the syntax names it.
+    let lam =
+        module.functions.iter().find(|f| f.id.name == "add").expect(
+            "the lambda must lower as its own FunctionIr named after its assignment target",
+        );
     lam.validate().expect("valid graph");
     assert!(
         callees(lam).contains(&"helper"),
@@ -1476,14 +1479,16 @@ class Outer {
 ";
 
 #[test]
-fn java_lambda_becomes_its_own_dollar_qualified_function() {
+fn java_lambda_takes_its_local_variable_name() {
     let module = lower_source(Language::Java, JAVA_CLOSURE, "Outer.java").expect("lowers");
+    // `IntUnaryOperator add = x -> ...` names the lambda from its local
+    // variable declarator - not the dollar-qualified synthetic form, which
+    // only applies when nothing in the syntax names it.
     let lam = module
         .functions
         .iter()
-        .find(|f| f.id.name.starts_with("lambda$"))
-        .expect("the lambda must lower as its own FunctionIr");
-    assert_eq!(lam.id.name, "lambda$Outer::outer$0");
+        .find(|f| f.id.name == "add")
+        .expect("the lambda must lower as its own FunctionIr named after its local variable");
     lam.validate().expect("valid graph");
     assert!(callees(lam).contains(&"helper"));
 
@@ -1797,14 +1802,16 @@ class Outer {
 ";
 
 #[test]
-fn kotlin_lambda_becomes_its_own_brace_qualified_function_with_bare_body() {
+fn kotlin_lambda_takes_its_property_name_with_bare_body() {
     let module = lower_source(Language::Kotlin, KOTLIN_CLOSURE, "Outer.kt").expect("lowers");
+    // `val helper = { x: Int -> ... }` names the lambda from its property
+    // declaration - not the brace-qualified synthetic form, which only
+    // applies when nothing in the syntax names it.
     let lam = module
         .functions
         .iter()
-        .find(|f| f.id.name.contains("{lambda#"))
-        .expect("the lambda must lower as its own FunctionIr");
-    assert_eq!(lam.id.name, "Outer::outer::{lambda#0}");
+        .find(|f| f.id.name == "helper")
+        .expect("the lambda must lower as its own FunctionIr named after its `val` binding");
     lam.validate().expect("valid graph");
 
     // Body statements sit directly in the lambda with no wrapping block,
@@ -1829,6 +1836,69 @@ fn kotlin_lambda_becomes_its_own_brace_qualified_function_with_bare_body() {
         "the lambda body must not leak identifiers into the enclosing statement: {:?}",
         val_helper.uses
     );
+}
+
+const JAVA_FIELD_CLOSURE: &str = r"
+class Outer {
+    java.util.function.IntUnaryOperator inc = x -> x + 1;
+}
+";
+
+/// A closure named from a *field* declarator, not a local variable - the
+/// declarator-list shape's other `binding_kinds` entry
+/// (`field_declaration`), reached the same way as `java_lambda_takes_its_local_variable_name`.
+#[test]
+fn java_field_initializer_lambda_takes_its_field_name() {
+    let module = lower_source(Language::Java, JAVA_FIELD_CLOSURE, "Outer.java").expect("lowers");
+    let lam = module
+        .functions
+        .iter()
+        .find(|f| f.id.name == "inc")
+        .expect("the lambda must be named after its field declarator");
+    lam.validate().expect("valid graph");
+}
+
+const PY_REASSIGN_CLOSURE: &str = "
+def outer():
+    add = None
+    add = lambda x: x + 1
+    return add(1)
+";
+
+/// A lambda assigned to an *already-declared* name still takes it: naming
+/// goes through the same `assign_kinds` shape regardless of whether the
+/// assignment is also the declaration.
+#[test]
+fn python_lambda_on_plain_reassignment_still_takes_its_target_name() {
+    let module = lower_source(Language::Python, PY_REASSIGN_CLOSURE, "outer.py").expect("lowers");
+    let lam = module
+        .functions
+        .iter()
+        .find(|f| f.id.name == "add")
+        .expect("the lambda must take the reassigned target's name");
+    lam.validate().expect("valid graph");
+}
+
+const RUST_BARE_CALLBACK: &str = r"
+fn outer(xs: Vec<i32>) -> Vec<i32> {
+    xs.into_iter().map(|x| x + 1).collect()
+}
+";
+
+/// A closure passed as a bare callback argument - no declarator, no
+/// assignment, no property - has nothing to borrow a name from and keeps
+/// the brace-qualified synthetic form unchanged from before contextual
+/// naming.
+#[test]
+fn rust_bare_callback_closure_keeps_the_brace_qualified_synthetic_name() {
+    let module = lower_source(Language::Rust, RUST_BARE_CALLBACK, "outer.rs").expect("lowers");
+    let closure = module
+        .functions
+        .iter()
+        .find(|f| f.id.name.contains("{closure#"))
+        .expect("a bare callback argument must still fall back to the synthetic form");
+    assert_eq!(closure.id.name, "outer::{closure#0}");
+    closure.validate().expect("valid graph");
 }
 
 #[test]
