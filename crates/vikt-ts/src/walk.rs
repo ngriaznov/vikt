@@ -46,28 +46,57 @@
 //! Python/Java - whose fields always resolve - never take the fallback
 //! path.
 //!
-//! # Known v1 simplifications
+//! # Match
 //!
-//! - `match`/`switch`/`when` and `try`/`except`/`catch` are not specially
-//!   modeled: an unmatched node kind falls back to a single `Pure` unit
-//!   spanning the whole construct. Calls anywhere inside it are still
-//!   extracted (so an opaque call three levels into a `match` arm is still
-//!   visible as an effect), but a `return`/`throw` inside one is not - it is
-//!   invisible to the effect classification. Not exercised by the required
-//!   test surface; flagged here because it is the sharpest edge in this
-//!   file. The one exception: a Kotlin expression-bodied function's tail
-//!   construct (e.g. `= when (x) { ... }`) is still wrapped in a real
-//!   `Return` node by `lower_module`, so effects reachable through *that*
-//!   specific `when` are not lost - only ones nested inside a `when`/`try`
-//!   used mid-block are. A pattern binding nested inside one of these
-//!   (e.g. a match arm's `let`) does get its own id in a `block_scoped`
-//!   language, via `collect_nested_binding_names` - it just isn't a real
-//!   `Binding` node in the graph, so it has no def/use edges of its own
-//!   beyond being folded into the enclosing opaque unit's `uses`.
-//! - Closures/lambdas are not modeled: a nested function's (or Kotlin
-//!   lambda's) free variables are never folded into the enclosing unit's
-//!   uses the way `vikt-js` does for captures, and any call inside one is
-//!   attributed to the *enclosing* function rather than kept separate.
+//! `match`/`switch`/`when`, when the construct is itself the statement being
+//! lowered (not nested inside a `return`/`let`/assignment - lowering only
+//! ever dispatches a whole statement at a time, and those stay one opaque
+//! unit exactly as before, extracting inner calls but not seeing inner
+//! control flow). [`FnCtx::lower_match`] turns the discriminant into a
+//! `Branch` whose successors are every arm's own head node, each arm
+//! [`FnCtx::lower_match_arm`] lowers through the ordinary `lower_stmt`/
+//! `lower_seq` machinery - own scope for its pattern bindings (a bound name
+//! never leaks to a sibling arm), real `Return`/`Throw`/`Call`/`Branch`
+//! nodes for anything inside it, joining back together after every arm.
+//! Arms are always mutually exclusive; there is no fallthrough modeling even
+//! for Java's colon-form `switch` (a deliberate v2 simplification - the
+//! table only records enough to fan out to each arm's head, not to chain
+//! one arm's fall-through into the next's).  When no arm is a wildcard/
+//! default, the discriminant itself stays a live exit, the same
+//! conservative "might not match anything" treatment `lower_if_chain` gives
+//! an `if` with no final `else`.
+//!
+//! # Try
+//!
+//! `try`/`except`/`catch`/`finally` (empty for Rust: no such construct).
+//! [`FnCtx::lower_try`] lowers the `try` body as ordinary code and every
+//! handler too - a `return`/`throw`/call inside a handler is a real graph
+//! node - but never links a handler in from the try body. Mirrors a
+//! *measured* decision in `vikt-js`: modeling the exception edge itself
+//! drags every scored line toward error paths (agreement with expert labels
+//! dropped when tried there). `finally` (and Python's `else`) runs once,
+//! sequentially after the try body's own exits - not duplicated along every
+//! exit path.
+//!
+//! # Closures
+//!
+//! A `closure_kinds` node (Rust closures, Python lambdas, Java lambdas,
+//! Kotlin lambda literals - a language's already-`function_kinds` nested
+//! `fn`/`def` needed no new handling, `collect_functions` already recursed
+//! into nested functions) becomes its own [`FunctionIr`], named via
+//! `closure_name_format` instead of a source-given name - see
+//! `GrammarTable::closure_name_format`'s docs and [`closure_name`]. A
+//! captured outer name is never folded into the *enclosing* unit's uses the
+//! way `vikt-js`'s `Facts::captures` does; it simply resolves as an ambient
+//! read inside the closure's own body, in the closure's own `FunctionIr` -
+//! a deliberately smaller v2 model. What the enclosing unit's scan does
+//! guarantee: neither a closure's captured reads nor any call inside it
+//! leak into the *enclosing* statement's own uses/calls - `collect_
+//! identifier_texts`/`collect_call_nodes_into` both stop at a
+//! `closure_kinds` boundary exactly like a `function_kinds` one.
+//!
+//! # Known v2 simplifications
+//!
 //! - Loop labels are not modeled: `break`/`continue` always target the
 //!   innermost loop.
 //! - Java's three-clause `for` and Kotlin's `do`/`while` fall back to the
@@ -80,6 +109,11 @@
 //!   (member/attribute names and nested-function bodies excluded), even
 //!   ones that also appear as a nested call's own use. Redundant, never
 //!   wrong.
+//! - A match/try/closure nested inside a `return`, a binding's value, or an
+//!   assignment's right-hand side is not specially modeled: the whole
+//!   containing statement stays one opaque unit (inner calls are still
+//!   extracted; inner control flow is not) - only when one of these three
+//!   constructs is itself the statement does `lower_stmt` dispatch into it.
 
 use std::collections::BTreeMap;
 
@@ -108,15 +142,75 @@ pub(crate) fn error_stats(node: Node<'_>) -> (usize, usize) {
 }
 
 /// Every function-like node anywhere in the tree, module-level and nested
-/// alike, in stable document order.
-fn collect_functions<'t>(table: &'static GrammarTable, node: Node<'t>, out: &mut Vec<Node<'t>>) {
+/// alike, in stable document order - paired with whether it is a
+/// `closure_kinds` node (anonymous, synthetically named) rather than a
+/// `function_kinds` one (source-named). Pre-order: a node is pushed before
+/// its own children are visited, so an enclosing function or closure always
+/// precedes anything nested inside it - `lower_module` relies on that to
+/// look up an already-assigned owner name while naming a nested closure.
+fn collect_functions<'t>(
+    table: &'static GrammarTable,
+    node: Node<'t>,
+    out: &mut Vec<(Node<'t>, bool)>,
+) {
     if table.function_kinds.contains(&node.kind()) {
-        out.push(node);
+        out.push((node, false));
+    } else if table.closure_kinds.contains(&node.kind()) {
+        out.push((node, true));
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
         collect_functions(table, child, out);
     }
+}
+
+/// Whether `kind` is a `function_kinds` or `closure_kinds` node - the
+/// boundary a call/identifier scan never crosses, since both become their
+/// own `FunctionIr`.
+fn is_function_like(table: &GrammarTable, kind: &str) -> bool {
+    table.function_kinds.contains(&kind) || table.closure_kinds.contains(&kind)
+}
+
+/// The nearest enclosing `function_kinds`/`closure_kinds` ancestor node -
+/// used both to key a closure's per-owner numbering and to look up that
+/// owner's already-assigned name (see `collect_functions`'s doc on why the
+/// lookup is always safe).
+fn enclosing_fn_node<'t>(table: &'static GrammarTable, node: Node<'t>) -> Option<Node<'t>> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if is_function_like(table, n.kind()) {
+            return Some(n);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// A closure's synthetic name: `table.closure_name_format` with `{owner}`
+/// and `{idx}` substituted - see the field's docs. `counts` is keyed by the
+/// enclosing function/closure node's id (or `usize::MAX` for a closure with
+/// no enclosing function at all, e.g. a top-level `<module>` initializer),
+/// giving each owner its own 0-based counter in appearance order.
+fn closure_name(
+    table: &'static GrammarTable,
+    fnode: Node<'_>,
+    source: &str,
+    names: &BTreeMap<usize, String>,
+    counts: &mut BTreeMap<usize, u32>,
+) -> String {
+    let scope = enclosing_fn_node(table, fnode);
+    let owner = scope
+        .and_then(|n| names.get(&n.id()).cloned())
+        .or_else(|| owner_prefix(table, fnode, source))
+        .unwrap_or_else(|| "<module>".to_owned());
+    let key = scope.map_or(usize::MAX, |n| n.id());
+    let counter = counts.entry(key).or_insert(0);
+    let idx = *counter;
+    *counter += 1;
+    table
+        .closure_name_format
+        .replace("{idx}", &idx.to_string())
+        .replace("{owner}", &owner)
 }
 
 /// The nearest enclosing `class_kinds` ancestor's name, for `Type::method`
@@ -223,15 +317,28 @@ pub(crate) fn lower_module(
     functions.push(module_ir);
     diagnostics.extend(module_diags);
 
-    for fnode in fn_nodes {
-        let bare_name = fnode
-            .child_by_field_name(table.function_name_field)
-            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-            .unwrap_or("<anon>");
-        let name = owner_prefix(table, fnode, source).map_or_else(
-            || bare_name.to_owned(),
-            |owner| format!("{owner}::{bare_name}"),
-        );
+    // Names are assigned in the same pre-order pass that lowers each
+    // function/closure, and recorded here as they go - a closure's name
+    // formula reads its enclosing function's name back out of this map (see
+    // `closure_name`), which is always already present by the time a nested
+    // node is reached (`collect_functions`'s pre-order guarantee).
+    let mut names: BTreeMap<usize, String> = BTreeMap::new();
+    let mut closure_counts: BTreeMap<usize, u32> = BTreeMap::new();
+
+    for (fnode, is_closure) in fn_nodes {
+        let name = if is_closure {
+            closure_name(table, fnode, source, &names, &mut closure_counts)
+        } else {
+            let bare_name = fnode
+                .child_by_field_name(table.function_name_field)
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                .unwrap_or("<anon>");
+            owner_prefix(table, fnode, source).map_or_else(
+                || bare_name.to_owned(),
+                |owner| format!("{owner}::{bare_name}"),
+            )
+        };
+        names.insert(fnode.id(), name.clone());
         let decl_line = line_of(fnode);
 
         // A parse error anywhere in the body (has_error is recursive, so
@@ -256,22 +363,45 @@ pub(crate) fn lower_module(
             continue;
         }
 
-        let params = field_or_kind(
-            fnode,
-            table.function_params_field,
-            table.function_params_kind,
-        );
-        let raw_body = field_or_kind(fnode, table.function_body_field, table.function_body_kind);
+        let (params, raw_body, bare_children) = if is_closure {
+            (
+                field_or_kind(fnode, table.closure_params_field, table.closure_params_kind),
+                field_or_kind(fnode, table.closure_body_field, table.closure_body_kind),
+                table.closure_body_is_bare_children,
+            )
+        } else {
+            (
+                field_or_kind(
+                    fnode,
+                    table.function_params_field,
+                    table.function_params_kind,
+                ),
+                field_or_kind(fnode, table.function_body_field, table.function_body_kind),
+                false,
+            )
+        };
         let mut lowerer = FnCtx::new(table, source, file, &name, decl_line);
         lowerer.lower_params(params);
-        if let Some(raw) = raw_body {
+        if bare_children {
+            // Kotlin's `lambda_literal`: no body wrapper to find by field
+            // or kind at all - every named child except the parameter list
+            // is a statement in the body, run in sequence.
+            let param_id = params.map(|p| p.id());
+            let mut cursor = fnode.walk();
+            let body_nodes: Vec<Node<'_>> = fnode
+                .named_children(&mut cursor)
+                .filter(|c| Some(c.id()) != param_id)
+                .collect();
+            let _ = lowerer.lower_seq(body_nodes.into_iter(), vec![0]);
+        } else if let Some(raw) = raw_body {
             let body = lowerer.unwrap_wrapper(raw);
             if table.block_kinds.contains(&body.kind()) {
                 let _ = lowerer.lower_block_children(body, vec![0]);
             } else {
-                // Expression body (Kotlin `fun f() = expr`): the tail
-                // expression's value is what the function returns, modeled
-                // the same way `vikt-js` models an arrow's expr-body.
+                // Expression body (Kotlin `fun f() = expr`, a Python
+                // lambda's implicit `return`): the tail expression's value
+                // is what the function returns, modeled the same way
+                // `vikt-js` models an arrow's expr-body.
                 let (entry, _) = lowerer.unit(body, NodeKind::Return, vec![]);
                 lowerer.link(&[0], entry);
             }
@@ -409,7 +539,7 @@ fn collect_call_nodes_into<'t>(
     node: Node<'t>,
     out: &mut Vec<Node<'t>>,
 ) {
-    if table.function_kinds.contains(&node.kind()) {
+    if is_function_like(table, node.kind()) {
         return;
     }
     let mut cursor = node.walk();
@@ -559,15 +689,35 @@ impl<'t> FnCtx<'t> {
 
     /// Identifier leaf texts under `node`, skipping a member-access node's
     /// property/attribute position (never a variable) and any nested
-    /// function's body (captures are not modeled).
+    /// function's or closure's body (a closure's own captured reads are
+    /// scanned separately, inside its own `FunctionIr` - see `lower_module`
+    /// and the module docs' "Closures" section).
     fn collect_identifier_texts(&self, node: Node<'t>, out: &mut Vec<&'t str>) {
+        self.collect_identifier_texts_excluding(node, None, out);
+    }
+
+    /// [`Self::collect_identifier_texts`], additionally never descending
+    /// into the subtree rooted at `skip` (by node id) - used to pull a
+    /// match arm's guard clause back out of its pattern scan when the
+    /// grammar nests the guard inside the pattern node itself (Rust's
+    /// `match_pattern.condition`), so the guard's reads are scanned
+    /// separately as uses rather than folded into the pattern's bindings.
+    fn collect_identifier_texts_excluding(
+        &self,
+        node: Node<'t>,
+        skip: Option<usize>,
+        out: &mut Vec<&'t str>,
+    ) {
+        if Some(node.id()) == skip {
+            return;
+        }
         if self.table.identifier_kinds.contains(&node.kind()) {
             if let Ok(text) = node.utf8_text(self.source.as_bytes()) {
                 out.push(text);
             }
             return;
         }
-        if self.table.function_kinds.contains(&node.kind()) {
+        if is_function_like(self.table, node.kind()) {
             return;
         }
         let skip_id = self
@@ -578,10 +728,10 @@ impl<'t> FnCtx<'t> {
             .flatten();
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            if skip_id == Some(child.id()) {
+            if skip_id == Some(child.id()) || Some(child.id()) == skip {
                 continue;
             }
-            self.collect_identifier_texts(child, out);
+            self.collect_identifier_texts_excluding(child, skip, out);
         }
     }
 
@@ -595,7 +745,7 @@ impl<'t> FnCtx<'t> {
     /// variable's id when `scan_uses` walks the same span.
     fn collect_nested_binding_names(&self, node: Node<'t>, out: &mut Vec<&'t str>) {
         let t = self.table;
-        if t.function_kinds.contains(&node.kind()) {
+        if is_function_like(t, node.kind()) {
             return;
         }
         if t.binding_kinds.contains(&node.kind()) {
@@ -878,6 +1028,12 @@ impl<'t> FnCtx<'t> {
             self.link(&open, entry);
             self.take_continue(exit);
             return Vec::new();
+        }
+        if t.match_kinds.contains(&kind) {
+            return self.lower_match(node, open);
+        }
+        if t.try_kinds.contains(&kind) {
+            return self.lower_try(node, open);
         }
         // Kotlin's bare `break`/`continue` (no label) lexes as a plain
         // `identifier`, not a dedicated node kind - going through `unit`
@@ -1312,5 +1468,261 @@ impl<'t> FnCtx<'t> {
         let mut exits = vec![branch];
         exits.extend(ctx.breaks);
         exits
+    }
+
+    /// A `match`/`switch`/`when` construct: the discriminant becomes a
+    /// `Branch` whose successors are the arms' own entry nodes, each arm
+    /// lowered through `lower_stmt`/`lower_seq` like ordinary code (own
+    /// scope for its pattern bindings, real `Return`/`Throw`/`Call` nodes
+    /// for anything inside it) - see the module docs' "Match" section.
+    /// Arms are treated as mutually exclusive with no fallthrough between
+    /// them, even for Java's colon-form `switch` (a v2 simplification: see
+    /// module docs).
+    fn lower_match(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
+        let subject = field_or_kind(node, t.match_subject_field, t.match_subject_kind);
+        let (calls, uses) = match subject {
+            Some(s) => {
+                let calls = self.extract_calls(s);
+                let mut uses = Vec::new();
+                self.scan_uses(s, &mut uses);
+                (calls, uses)
+            }
+            None => (Vec::new(), Vec::new()),
+        };
+        let line = line_of(node);
+        let label = snippet(node, self.source);
+        let disc = self.push(IrNode {
+            line: Some(line),
+            kind: NodeKind::Branch,
+            defs: Vec::new(),
+            uses,
+            succs: Vec::new(),
+            label,
+        });
+        let entry = if let (Some(&first), Some(&last)) = (calls.first(), calls.last()) {
+            self.link(&[last], disc);
+            first
+        } else {
+            disc
+        };
+        self.link(&open, entry);
+
+        let container = field_or_kind(node, t.match_body_field, t.match_body_kind).unwrap_or(node);
+        let mut cursor = container.walk();
+        let arms: Vec<Node<'t>> = container
+            .named_children(&mut cursor)
+            .filter(|c| t.match_arm_kinds.contains(&c.kind()))
+            .collect();
+
+        let mut exits = Vec::new();
+        let mut has_default = false;
+        for arm in arms {
+            let (arm_exits, is_default) = self.lower_match_arm(arm, disc);
+            exits.extend(arm_exits);
+            has_default |= is_default;
+        }
+        // No arm unconditionally matches: the value might match nothing
+        // (Python's `match` silently falls through; a non-exhaustive `when`
+        // is a compile error in Kotlin, but exhaustiveness isn't something
+        // this walker can verify from syntax alone), so the discriminant
+        // itself stays a live exit - the same conservative treatment
+        // `lower_if_chain` gives an `if` with no final `else`.
+        if !has_default {
+            exits.push(disc);
+        }
+        exits
+    }
+
+    /// One match arm: a `Pure` head node (defs = pattern bindings, uses =
+    /// guard/label reads) feeding into the arm's own body statements,
+    /// pattern-scoped so a bound name never leaks into a sibling arm.
+    /// Returns the arm's own exits and whether it is a wildcard/default arm
+    /// (`_`, `default`, or no label at all).
+    fn lower_match_arm(&mut self, arm: Node<'t>, disc: usize) -> (Vec<usize>, bool) {
+        let t = self.table;
+        let labels: Vec<Node<'t>> = if t.match_arm_pattern_multi {
+            let mut cursor = arm.walk();
+            arm.children_by_field_name(t.match_arm_pattern_field, &mut cursor)
+                .collect()
+        } else {
+            field_or_kind(arm, t.match_arm_pattern_field, t.match_arm_pattern_kind)
+                .into_iter()
+                .collect()
+        };
+        let is_default = labels.is_empty()
+            || labels
+                .iter()
+                .all(|l| matches!(snippet(*l, self.source).as_str(), "_" | "default"));
+
+        if t.block_scoped {
+            self.push_scope();
+        }
+        let mut defs = Vec::new();
+        let mut uses = Vec::new();
+        for label in &labels {
+            // A guard nested inside the label itself (Rust's
+            // `match_pattern.condition`) must not be scanned as part of the
+            // pattern's own bindings - only as a use, once the bindings it
+            // reads are already declared.
+            let nested_guard = (!t.match_pattern_guard_field.is_empty())
+                .then(|| label.child_by_field_name(t.match_pattern_guard_field))
+                .flatten();
+            if t.match_arm_pattern_declares {
+                let mut names = Vec::new();
+                self.collect_identifier_texts_excluding(
+                    *label,
+                    nested_guard.map(|g| g.id()),
+                    &mut names,
+                );
+                for name in names {
+                    let v = self.declare(name);
+                    if !defs.contains(&v) {
+                        defs.push(v);
+                    }
+                }
+            } else {
+                self.scan_uses(*label, &mut uses);
+            }
+            if let Some(g) = nested_guard {
+                self.scan_uses(g, &mut uses);
+            }
+        }
+        // A guard as a sibling field on the arm itself (Python's
+        // `case_clause.guard`), scanned after every label's bindings are
+        // declared so it reads the pattern-bound names, not whatever they
+        // shadow.
+        let guard = (!t.match_arm_guard_field.is_empty())
+            .then(|| arm.child_by_field_name(t.match_arm_guard_field))
+            .flatten();
+        if let Some(g) = guard {
+            self.scan_uses(g, &mut uses);
+        }
+
+        let label_ids: Vec<usize> = labels.iter().map(Node::id).collect();
+        let guard_id = guard.map(|g| g.id());
+        let mut cursor = arm.walk();
+        let body_nodes: Vec<Node<'t>> = arm
+            .named_children(&mut cursor)
+            .filter(|c| !label_ids.contains(&c.id()) && Some(c.id()) != guard_id)
+            .collect();
+
+        let head_line = line_of(arm);
+        let head_label = snippet(arm, self.source);
+        let head = self.push(IrNode {
+            line: Some(head_line),
+            kind: NodeKind::Pure,
+            defs,
+            uses,
+            succs: Vec::new(),
+            label: head_label,
+        });
+        self.link(&[disc], head);
+        let exits = self.lower_seq(body_nodes.into_iter(), vec![head]);
+        if t.block_scoped {
+            self.pop_scope();
+        }
+        (exits, is_default)
+    }
+
+    /// `try`/`except`/`catch`/`finally`: the `try` body lowers as ordinary
+    /// code, every handler is lowered too (so a `return`/`throw`/call
+    /// inside one is a real graph node) but never linked in *from* the try
+    /// body - modeling the exception edge itself is a measured regression
+    /// in `vikt-js` (agreement with expert labels dropped when tried), so
+    /// this frontend makes the same call. `finally` (and Python's `else`)
+    /// runs once, sequentially after the try body's own exits - not
+    /// duplicated along every exit path.
+    fn lower_try(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
+        let Some(body) = field_or_kind(node, t.try_body_field, t.try_body_kind) else {
+            let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
+            self.link(&open, entry);
+            return vec![exit];
+        };
+        let mut exits = self.lower_block(body, open);
+
+        let mut cursor = node.walk();
+        let catches: Vec<Node<'t>> = node
+            .named_children(&mut cursor)
+            .filter(|c| t.catch_kinds.contains(&c.kind()))
+            .collect();
+        for catch in catches {
+            self.lower_catch_handler(catch);
+        }
+
+        if !t.try_else_kind.is_empty()
+            && let Some(else_node) = first_child_of_kind(node, t.try_else_kind)
+            && let Some(else_body) = else_node.child_by_field_name(t.try_else_body_field)
+        {
+            exits = self.lower_block(else_body, exits);
+        }
+
+        if !t.finally_kind.is_empty()
+            && let Some(fin) = first_child_of_kind(node, t.finally_kind)
+            && let Some(fin_body) = field_or_kind(fin, t.finally_body_field, t.finally_body_kind)
+        {
+            exits = self.lower_block(fin_body, exits);
+        }
+        exits
+    }
+
+    /// One handler clause: lowered from a synthetic, deliberately
+    /// unreachable entry node (defs = the bound exception name, if any) -
+    /// see `lower_try`'s docs on why it is never linked from the try body.
+    fn lower_catch_handler(&mut self, catch: Node<'t>) {
+        let t = self.table;
+        let Some(body) = field_or_kind(catch, t.catch_body_field, t.catch_body_kind) else {
+            return;
+        };
+        if t.block_scoped {
+            self.push_scope();
+        }
+        let mut defs = Vec::new();
+        if let Some(param) = self.catch_param_node(catch) {
+            let mut names = Vec::new();
+            self.collect_identifier_texts(param, &mut names);
+            for name in names {
+                let v = self.declare(name);
+                if !defs.contains(&v) {
+                    defs.push(v);
+                }
+            }
+        }
+        let line = line_of(catch);
+        let entry = self.push(IrNode {
+            line: Some(line),
+            kind: NodeKind::Pure,
+            defs,
+            uses: Vec::new(),
+            succs: Vec::new(),
+            label: "<catch>".into(),
+        });
+        let _ = self.lower_block(body, vec![entry]);
+        if t.block_scoped {
+            self.pop_scope();
+        }
+    }
+
+    /// A handler's bound exception name, across the two shapes this
+    /// frontend's grammars use - see the field docs on `catch_param_kind`
+    /// and `catch_param_as_field`.
+    fn catch_param_node(&self, catch: Node<'t>) -> Option<Node<'t>> {
+        let t = self.table;
+        if !t.catch_param_kind.is_empty() {
+            let found = first_child_of_kind(catch, t.catch_param_kind)?;
+            return if t.catch_param_name_field.is_empty() {
+                Some(found)
+            } else {
+                found.child_by_field_name(t.catch_param_name_field)
+            };
+        }
+        if !t.catch_param_as_field.is_empty() {
+            let value = catch.child_by_field_name(t.catch_param_as_field)?;
+            if value.kind() == t.catch_param_as_pattern_kind {
+                return value.child_by_field_name(t.catch_param_alias_field);
+            }
+        }
+        None
     }
 }

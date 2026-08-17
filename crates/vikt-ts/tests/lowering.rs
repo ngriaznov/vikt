@@ -405,7 +405,7 @@ fn rust_tiering_prefers_the_effectful_tail_over_dead_bookkeeping() {
     );
 }
 
-const RUST_LET_IN_UNMODELED_MATCH: &str = r"
+const RUST_LET_IN_MODELED_MATCH: &str = r"
 fn pick(y: i32, cond: bool) -> i32 {
     match cond {
         true => {
@@ -419,12 +419,11 @@ fn pick(y: i32, cond: bool) -> i32 {
 ";
 
 #[test]
-fn rust_nested_let_in_unmodeled_match_shadows_outer_param() {
-    // `match` itself is unmodeled (falls back to a single opaque unit), but
-    // a `let` nested inside an arm must still shadow instead of resolving
-    // through to the outer parameter of the same name.
+fn rust_nested_let_in_match_arm_shadows_outer_param() {
+    // A `let` nested inside a match arm must shadow the outer parameter of
+    // the same name, scoped to just that arm.
     let module =
-        lower_source(Language::Rust, RUST_LET_IN_UNMODELED_MATCH, "pick.rs").expect("lowers");
+        lower_source(Language::Rust, RUST_LET_IN_MODELED_MATCH, "pick.rs").expect("lowers");
     let f = function(&module, "pick");
     f.validate().expect("valid graph");
 
@@ -435,16 +434,25 @@ fn rust_nested_let_in_unmodeled_match_shadows_outer_param() {
         .and_then(|n| n.defs.first().copied())
         .expect("y is the first param");
 
-    let match_unit_uses = f
+    let arm_let = f
         .nodes
         .iter()
-        .find(|n| n.label.starts_with("match cond"))
-        .map(|n| n.uses.clone())
-        .expect("opaque match unit");
+        .find(|n| n.label.starts_with("let y = 99"))
+        .expect("the arm's own `let y`");
+    let arm_y = arm_let.defs.first().copied().expect("arm-scoped y");
+    assert_ne!(
+        arm_y, param_def,
+        "the arm's nested `let y` must shadow with a fresh VarId, not reuse the outer param"
+    );
+
+    let use_call = f
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "use_x"))
+        .expect("use_x(y) call node");
     assert!(
-        !match_unit_uses.contains(&param_def),
-        "the arm's nested `let y` must not resolve to the outer parameter's VarId: \
-         {match_unit_uses:?} vs param {param_def:?}"
+        use_call.uses.contains(&arm_y) && !use_call.uses.contains(&param_def),
+        "use_x(y) inside the arm must read the arm-scoped y, not the outer param"
     );
 
     let tail_uses = f
@@ -456,6 +464,142 @@ fn rust_nested_let_in_unmodeled_match_shadows_outer_param() {
     assert!(
         tail_uses.contains(&param_def),
         "the function's tail `y` must still read the outer parameter"
+    );
+}
+
+const RUST_MATCH_RETURN_IN_ARM: &str = r"
+fn classify(x: i32) -> i32 {
+    match x {
+        0 => {
+            return -1;
+        }
+        n if n > 10 => {
+            log_big(n);
+            return n;
+        }
+        _ => 0,
+    }
+}
+";
+
+#[test]
+fn rust_match_models_branch_fanout_and_returns_inside_arms() {
+    let module =
+        lower_source(Language::Rust, RUST_MATCH_RETURN_IN_ARM, "classify.rs").expect("lowers");
+    let f = function(&module, "classify");
+    f.validate().expect("valid graph");
+
+    let (disc_id, disc) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("match x"))
+        .expect("the discriminant Branch node");
+    assert!(
+        disc.succs.len() >= 3,
+        "the discriminant must fan out to every arm's head: {:?}",
+        disc.succs
+    );
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(
+        returns.len(),
+        2,
+        "both `return`s inside arms must reach effect classification as real Return nodes: {:?}",
+        kinds(f)
+    );
+    assert!(returns.iter().all(|n| n.succs.is_empty()));
+
+    let log_call = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "log_big"))
+        .expect("log_big(n) call inside the guarded arm");
+    assert!(
+        !f.nodes[disc_id].succs.contains(&log_call),
+        "the guarded arm's call must not be directly reachable from the discriminant - it \
+         sits behind that arm's own head node"
+    );
+
+    // A guard's own reads (`n > 10`) must resolve to the pattern binding
+    // `n`, not spawn an unrelated ambient variable.
+    let guard_arm_head = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("n if n > 10"))
+        .expect("the guarded arm's head node");
+    assert_eq!(guard_arm_head.defs.len(), 1, "`n` is the pattern binding");
+    assert!(
+        guard_arm_head.uses.contains(&guard_arm_head.defs[0]),
+        "the guard `n > 10` must read the just-declared pattern binding `n`"
+    );
+}
+
+const RUST_CLOSURE: &str = r"
+fn outer(base: i32) -> i32 {
+    let add = |x: i32| helper(x) + base;
+    add(5)
+}
+";
+
+#[test]
+fn rust_closure_becomes_its_own_brace_qualified_function() {
+    let module = lower_source(Language::Rust, RUST_CLOSURE, "outer.rs").expect("lowers");
+    let closure = module
+        .functions
+        .iter()
+        .find(|f| f.id.name.contains("{closure#"))
+        .expect("the closure must lower as its own FunctionIr");
+    assert_eq!(closure.id.name, "outer::{closure#0}");
+    closure.validate().expect("valid graph");
+
+    // `x` is the closure's own parameter; `base` and `helper` are captured
+    // from the enclosing scope - both must still resolve as uses inside the
+    // closure's own body, not vanish.
+    let param_def = closure
+        .nodes
+        .iter()
+        .find(|n| n.label == "<params>")
+        .and_then(|n| n.defs.first().copied())
+        .expect("x param");
+    assert!(
+        callees(closure).contains(&"helper"),
+        "the call inside the closure must be kept as the closure's own Call node: {:?}",
+        callees(closure)
+    );
+    let tail = closure
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("closure tail expression as a Return node");
+    assert!(tail.uses.contains(&param_def), "the tail reads `x`");
+    assert!(
+        tail.uses.len() >= 2,
+        "the tail must also read the captured `base`: {:?}",
+        tail.uses
+    );
+
+    // Neither the capture nor the inner call may leak into the enclosing
+    // `let add = ...` statement - the whole closure subtree is opaque to it.
+    let outer = function(&module, "outer");
+    let let_add = outer
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("let add"))
+        .expect("let add node");
+    assert!(
+        let_add.uses.is_empty(),
+        "the closure body must not leak identifiers into the enclosing statement: {:?}",
+        let_add.uses
+    );
+    assert!(
+        !callees(outer).contains(&"helper"),
+        "the call inside the closure must not also be extracted into the enclosing function: {:?}",
+        callees(outer)
     );
 }
 
@@ -670,6 +814,162 @@ fn python_raise_is_throw_and_has_no_successors() {
         .expect("a Throw node");
     assert!(throw.succs.is_empty());
     assert!(throw.kind.is_effect());
+}
+
+const PY_MATCH_RETURN_IN_ARM: &str = "
+def classify(x):
+    match x:
+        case 0:
+            return -1
+        case n if n > 10:
+            log_big(n)
+            return n
+        case _:
+            return 0
+";
+
+#[test]
+fn python_match_models_branch_fanout_and_returns_inside_arms() {
+    let module =
+        lower_source(Language::Python, PY_MATCH_RETURN_IN_ARM, "classify.py").expect("lowers");
+    let f = function(&module, "classify");
+    f.validate().expect("valid graph");
+
+    let (disc_id, disc) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("match x"))
+        .expect("the discriminant Branch node");
+    assert!(
+        disc.succs.len() >= 3,
+        "the discriminant must fan out to every arm's head: {:?}",
+        disc.succs
+    );
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(
+        returns.len(),
+        3,
+        "every arm's `return` must reach effect classification: {:?}",
+        kinds(f)
+    );
+    assert!(returns.iter().all(|n| n.succs.is_empty()));
+
+    let guard_head = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("case n if n > 10"))
+        .expect("the guarded arm's head node");
+    assert_eq!(
+        guard_head.defs.len(),
+        1,
+        "`n` is the capture-pattern binding"
+    );
+    assert!(
+        guard_head.uses.contains(&guard_head.defs[0]),
+        "the guard `n > 10` must read the just-declared pattern binding `n`"
+    );
+
+    let log_call = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "log_big"))
+        .expect("log_big(n) call inside the guarded arm");
+    assert!(
+        !f.nodes[disc_id].succs.contains(&log_call),
+        "the guarded arm's call sits behind that arm's own head, not directly off the discriminant"
+    );
+}
+
+const PY_TRY_CATCH: &str = "
+def f(x):
+    try:
+        risky(x)
+    except ValueError as e:
+        log(e)
+        return -1
+    return 0
+";
+
+#[test]
+fn python_try_models_handler_binding_and_visible_return_but_stays_unreachable() {
+    let module = lower_source(Language::Python, PY_TRY_CATCH, "f.py").expect("lowers");
+    let f = function(&module, "f");
+    f.validate().expect("valid graph");
+
+    let (catch_id, catch_entry) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.label == "<catch>")
+        .expect("the handler's entry node");
+    assert_eq!(
+        catch_entry.defs.len(),
+        1,
+        "the `as e` binding must be declared on the handler entry"
+    );
+    assert!(
+        !f.nodes.iter().any(|n| n.succs.contains(&catch_id)),
+        "the handler must never be linked in from the try body's normal flow"
+    );
+
+    let handler_return = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("the handler's own `return -1` must be a real Return node");
+    assert!(handler_return.succs.is_empty());
+
+    let log_call = f
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "log"))
+        .expect("log(e) call inside the handler");
+    assert!(
+        log_call.uses.contains(&catch_entry.defs[0]),
+        "log(e) must read the handler-bound `e`"
+    );
+}
+
+const PY_CLOSURE: &str = "
+def outer(base):
+    add = lambda x: helper(x) + base
+    return add(5)
+";
+
+#[test]
+fn python_lambda_becomes_its_own_angle_qualified_function() {
+    let module = lower_source(Language::Python, PY_CLOSURE, "outer.py").expect("lowers");
+    let lam = module
+        .functions
+        .iter()
+        .find(|f| f.id.name.contains("<lambda>"))
+        .expect("the lambda must lower as its own FunctionIr");
+    assert_eq!(lam.id.name, "outer.<locals>.<lambda>");
+    lam.validate().expect("valid graph");
+    assert!(
+        callees(lam).contains(&"helper"),
+        "the call inside the lambda must be the lambda's own Call node: {:?}",
+        callees(lam)
+    );
+
+    let outer = function(&module, "outer");
+    let assign = outer
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("add = lambda"))
+        .expect("the assignment node");
+    assert!(
+        assign.uses.is_empty(),
+        "the lambda body must not leak identifiers into the enclosing assignment: {:?}",
+        assign.uses
+    );
+    assert!(!callees(outer).contains(&"helper"));
 }
 
 #[test]
@@ -1019,6 +1319,186 @@ fn java_return_inside_branch_has_no_successors() {
     assert!(returns.iter().all(|n| n.succs.is_empty()));
 }
 
+const JAVA_SWITCH_RETURN_IN_ARM: &str = r"
+class Classify {
+    int classify(int x) {
+        switch (x) {
+            case 0:
+                return -1;
+            case 1:
+            case 2:
+                logHit(x);
+                return x;
+            default:
+                return 0;
+        }
+    }
+}
+";
+
+#[test]
+fn java_colon_switch_models_branch_fanout_and_returns_inside_arms() {
+    let module =
+        lower_source(Language::Java, JAVA_SWITCH_RETURN_IN_ARM, "Classify.java").expect("lowers");
+    let f = function(&module, "Classify::classify");
+    f.validate().expect("valid graph");
+
+    let (disc_id, disc) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("switch (x)"))
+        .expect("the discriminant Branch node");
+    assert!(
+        disc.succs.len() >= 4,
+        "one head per switch_block_statement_group, including the empty `case 1:` fallthrough \
+         label: {:?}",
+        disc.succs
+    );
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(returns.len(), 3, "{:?}", kinds(f));
+    assert!(returns.iter().all(|n| n.succs.is_empty()));
+
+    let hit_call = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "logHit"))
+        .expect("logHit(x) call inside the `case 2` arm");
+    assert!(!f.nodes[disc_id].succs.contains(&hit_call));
+}
+
+const JAVA_ARROW_SWITCH: &str = r"
+class Classify {
+    void classify(int x) {
+        switch (x) {
+            case 0 -> logZero();
+            case 1, 2 -> {
+                logHit(x);
+                logDone();
+            }
+            default -> logDefault();
+        }
+    }
+}
+";
+
+#[test]
+fn java_arrow_switch_arms_lower_through_the_same_generic_path() {
+    // The arrow form (`switch_rule`) has a completely different shape from
+    // the colon form (label + trailing statements vs. label + one body
+    // node) - this only exercises the other half of `match_arm_kinds`. Used
+    // as a bare statement (not returned/assigned), since match modeling
+    // only applies when the construct is itself the statement - see the
+    // module docs.
+    let module = lower_source(Language::Java, JAVA_ARROW_SWITCH, "Classify.java").expect("lowers");
+    let f = function(&module, "Classify::classify");
+    f.validate().expect("valid graph");
+
+    let disc = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("switch (x)"))
+        .expect("the discriminant Branch node");
+    assert_eq!(
+        disc.succs.len(),
+        3,
+        "one head per switch_rule: {:?}",
+        disc.succs
+    );
+    assert!(
+        callees(f).contains(&"logHit"),
+        "the call inside the multi-value arrow arm must still be extracted: {:?}",
+        callees(f)
+    );
+}
+
+const JAVA_TRY_CATCH: &str = r"
+class Risky {
+    int f(int x) {
+        try {
+            risky(x);
+        } catch (IllegalArgumentException e) {
+            log(e);
+            return -1;
+        }
+        return 0;
+    }
+}
+";
+
+#[test]
+fn java_try_models_handler_binding_and_visible_return_but_stays_unreachable() {
+    let module = lower_source(Language::Java, JAVA_TRY_CATCH, "Risky.java").expect("lowers");
+    let f = function(&module, "Risky::f");
+    f.validate().expect("valid graph");
+
+    let (catch_id, catch_entry) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.label == "<catch>")
+        .expect("the handler's entry node");
+    assert_eq!(catch_entry.defs.len(), 1, "the caught `e` must be declared");
+    assert!(
+        !f.nodes.iter().any(|n| n.succs.contains(&catch_id)),
+        "the handler must never be linked in from the try body's normal flow"
+    );
+
+    let handler_return = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("the handler's own return must be a real Return node");
+    assert!(handler_return.succs.is_empty());
+
+    let log_call = f
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "log"))
+        .expect("log(e) call inside the handler");
+    assert!(log_call.uses.contains(&catch_entry.defs[0]));
+}
+
+const JAVA_CLOSURE: &str = r"
+class Outer {
+    int outer(int base) {
+        java.util.function.IntUnaryOperator add = x -> helper(x) + base;
+        return add.applyAsInt(5);
+    }
+}
+";
+
+#[test]
+fn java_lambda_becomes_its_own_dollar_qualified_function() {
+    let module = lower_source(Language::Java, JAVA_CLOSURE, "Outer.java").expect("lowers");
+    let lam = module
+        .functions
+        .iter()
+        .find(|f| f.id.name.starts_with("lambda$"))
+        .expect("the lambda must lower as its own FunctionIr");
+    assert_eq!(lam.id.name, "lambda$Outer::outer$0");
+    lam.validate().expect("valid graph");
+    assert!(callees(lam).contains(&"helper"));
+
+    let outer = function(&module, "Outer::outer");
+    let decl = outer
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("add = x"))
+        .expect("the declarator node");
+    assert!(
+        decl.uses.is_empty(),
+        "the lambda body must not leak identifiers into the enclosing declaration: {:?}",
+        decl.uses
+    );
+    assert!(!callees(outer).contains(&"helper"));
+}
+
 #[test]
 fn java_lowering_is_deterministic() {
     let a = lower_source(Language::Java, JAVA_LOOP, "Summer.java").expect("lowers");
@@ -1193,6 +1673,160 @@ fn kotlin_expression_body_lowers_to_a_real_return_node() {
         .expect("expression body must still produce a Return node");
     assert!(ret.succs.is_empty());
     assert!(callees(f).contains(&"compute"));
+}
+
+const KOTLIN_WHEN_RETURN_IN_ARM: &str = "
+class Classify {
+    fun classify(x: Int): Int {
+        when (x) {
+            0 -> {
+                return -1
+            }
+            1, 2 -> {
+                logHit(x)
+                return x
+            }
+            else -> return 0
+        }
+        return -99
+    }
+}
+";
+
+#[test]
+fn kotlin_when_models_branch_fanout_and_returns_inside_arms() {
+    let module =
+        lower_source(Language::Kotlin, KOTLIN_WHEN_RETURN_IN_ARM, "Classify.kt").expect("lowers");
+    let f = function(&module, "Classify::classify");
+    f.validate().expect("valid graph");
+
+    let (disc_id, disc) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("when (x)"))
+        .expect("the discriminant Branch node");
+    assert_eq!(
+        disc.succs.len(),
+        3,
+        "one head per when_entry: {:?}",
+        disc.succs
+    );
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(
+        returns.len(),
+        4,
+        "the three arms' returns, plus the trailing `return -99` (unreachable, since every \
+         arm returns, but still a real lowered node): {:?}",
+        kinds(f)
+    );
+    assert!(returns.iter().all(|n| n.succs.is_empty()));
+
+    let hit_call = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "logHit"))
+        .expect("logHit(x) call inside the `1, 2` arm");
+    assert!(!f.nodes[disc_id].succs.contains(&hit_call));
+}
+
+const KOTLIN_TRY_CATCH: &str = "
+class Risky {
+    fun f(x: Int): Int {
+        try {
+            risky(x)
+        } catch (e: IllegalArgumentException) {
+            log(e)
+            return -1
+        }
+        return 0
+    }
+}
+";
+
+#[test]
+fn kotlin_try_models_handler_binding_and_visible_return_but_stays_unreachable() {
+    let module = lower_source(Language::Kotlin, KOTLIN_TRY_CATCH, "Risky.kt").expect("lowers");
+    let f = function(&module, "Risky::f");
+    f.validate().expect("valid graph");
+
+    let (catch_id, catch_entry) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| n.label == "<catch>")
+        .expect("the handler's entry node");
+    assert_eq!(catch_entry.defs.len(), 1, "the caught `e` must be declared");
+    assert!(
+        !f.nodes.iter().any(|n| n.succs.contains(&catch_id)),
+        "the handler must never be linked in from the try body's normal flow"
+    );
+
+    let handler_return = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("the handler's own return must be a real Return node");
+    assert!(handler_return.succs.is_empty());
+
+    let log_call = f
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "log"))
+        .expect("log(e) call inside the handler");
+    assert!(log_call.uses.contains(&catch_entry.defs[0]));
+}
+
+const KOTLIN_CLOSURE: &str = "
+class Outer {
+    fun outer(base: Int): Int {
+        val helper = { x: Int ->
+            val z = x + base
+            z
+        }
+        return helper(5)
+    }
+}
+";
+
+#[test]
+fn kotlin_lambda_becomes_its_own_brace_qualified_function_with_bare_body() {
+    let module = lower_source(Language::Kotlin, KOTLIN_CLOSURE, "Outer.kt").expect("lowers");
+    let lam = module
+        .functions
+        .iter()
+        .find(|f| f.id.name.contains("{lambda#"))
+        .expect("the lambda must lower as its own FunctionIr");
+    assert_eq!(lam.id.name, "Outer::outer::{lambda#0}");
+    lam.validate().expect("valid graph");
+
+    // Body statements sit directly in the lambda with no wrapping block,
+    // but must still lower in sequence: `z`'s declaration must precede its
+    // use in the tail.
+    let z_decl = lam
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("val z"))
+        .expect("val z");
+    let tail = lam.nodes.iter().find(|n| n.label == "z").expect("tail z");
+    assert!(tail.uses.contains(&z_decl.defs[0]));
+
+    let outer = function(&module, "Outer::outer");
+    let val_helper = outer
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("val helper"))
+        .expect("val helper node");
+    assert!(
+        val_helper.uses.is_empty(),
+        "the lambda body must not leak identifiers into the enclosing statement: {:?}",
+        val_helper.uses
+    );
 }
 
 #[test]
