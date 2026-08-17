@@ -748,7 +748,11 @@ fn score_tree(
 /// walks the package's own sources file by file instead, same as
 /// [`score_tree`].
 fn score_crate(root: &Path, lowering_arg: Lowering) -> Result<ScoreOutcome, Box<dyn Error>> {
-    let lowered = lowering::lower_rust_crate(root, None, lowering_arg)?;
+    // `include_tests: false` — calibrate always excludes test sources
+    // itself (the loop below re-applies `is_test_path` regardless), never
+    // by a flag; sharing the predicate with `lowering::lower_rust_crate`
+    // just means the two default policies can't diverge.
+    let (lowered, _) = lowering::lower_rust_crate(root, None, lowering_arg, false)?;
     let mut scored = Vec::new();
     let mut file_scores = FileScores::new();
     let mut by_file: BTreeMap<PathBuf, Vec<FunctionIr>> = BTreeMap::new();

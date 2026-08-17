@@ -392,6 +392,7 @@ vikt Foo.java                           # Java source, tree-sitter (new capabili
 vikt foo.go                             # Go source, tree-sitter (the only lowering it has)
 vikt path/to/package --package foo      # whole cargo package, deps compiled not analyzed
 vikt path/to/folder                     # any directory: every known extension, one sidecar
+vikt path/to/folder --include-tests     # ...tests scored too, instead of skipped by default
 vikt path/to/repo --scope repo          # call-graph blend across the whole run, not just one file
 vikt foo.py --scorer strahler           # one instrument alone
 vikt foo.py --scorer current            # the incumbent alone
@@ -426,6 +427,18 @@ JS build script and a Java helper class all in one run, one JSON artifact,
 already does. A directory *with* `Cargo.toml` keeps cargo mode for its `.rs`
 files exactly as before, and now additionally lowers any other-language
 sources the package directory contains, noted on stderr.
+
+By default, both walks skip files matching the input language's registry
+test-path convention — `*_test.go`, `test_*.py`/`*_test.py`, a `test`/`tests`
+tree, `.test.js`/`.spec.js`, `*Test.java`/`*Test.kt`, Rust's `benches`/
+`examples` directories, and so on, the same conventions `vikt calibrate`
+already excludes mutants from. A table-driven test file can dwarf the
+production code around it in body size, and letting it into a repo-scope
+ranking drowns the code under test in its own suite. `--include-tests`
+restores the old walk-everything behavior; how many files were skipped is
+noted on stderr, never in the JSON. An explicitly named single-file input —
+`vikt foo_test.go` — always scores regardless of this flag; only directory
+discovery is affected.
 
 ### File and repo scope
 

@@ -182,6 +182,10 @@ fn primary_rust_file(input: &Path) -> Result<Lowered, Box<dyn std::error::Error>
 /// is a plain per-file tree-sitter scan of the package's own sources (see
 /// [`walk_rust_sources`]), which cannot see anything outside the package.
 ///
+/// The second element of the returned pair is how many distinct source
+/// files were dropped as test files (see [`filter_rust_test_functions`]) —
+/// `0` whenever `include_tests` is set.
+///
 /// # Errors
 ///
 /// Any lowering failure that isn't specifically "the MIR helper is
@@ -190,21 +194,30 @@ pub fn lower_rust_crate(
     input: &Path,
     package: Option<&str>,
     lowering: Lowering,
-) -> Result<Lowered, Box<dyn std::error::Error>> {
+    include_tests: bool,
+) -> Result<(Lowered, usize), Box<dyn std::error::Error>> {
     match lowering {
-        Lowering::Primary => primary_rust_crate(input, package),
-        Lowering::Ast => ast_rust_package(input),
+        Lowering::Primary => primary_rust_crate(input, package, include_tests),
+        Lowering::Ast => ast_rust_package(input, include_tests),
         Lowering::Auto => match vikt_rs::lower_crate(input, package) {
-            Ok(modules) => Ok(Lowered {
-                generator: "vikt-rs/rustc_public".to_owned(),
-                functions: modules.into_iter().flat_map(|m| m.functions).collect(),
-                profile: PanelProfile::Instruction,
-            }),
+            Ok(modules) => {
+                let functions = modules.into_iter().flat_map(|m| m.functions).collect();
+                let (functions, skipped) =
+                    filter_rust_test_functions(&rust_package_root(input), functions, include_tests);
+                Ok((
+                    Lowered {
+                        generator: "vikt-rs/rustc_public".to_owned(),
+                        functions,
+                        profile: PanelProfile::Instruction,
+                    },
+                    skipped,
+                ))
+            }
             Err(vikt_rs::RsError::HelperMissing) => {
                 eprintln!(
                     "vikt: note: vikt-rust-lower not found; falling back to a per-file tree-sitter scan of the package (pass --lowering primary to require it)"
                 );
-                ast_rust_package(input)
+                ast_rust_package(input, include_tests)
             }
             Err(e) => Err(e.into()),
         },
@@ -214,30 +227,82 @@ pub fn lower_rust_crate(
 fn primary_rust_crate(
     input: &Path,
     package: Option<&str>,
-) -> Result<Lowered, Box<dyn std::error::Error>> {
+    include_tests: bool,
+) -> Result<(Lowered, usize), Box<dyn std::error::Error>> {
     let modules = vikt_rs::lower_crate(input, package)?;
-    Ok(Lowered {
-        generator: "vikt-rs/rustc_public".to_owned(),
-        functions: modules.into_iter().flat_map(|m| m.functions).collect(),
-        profile: PanelProfile::Instruction,
-    })
+    let functions = modules.into_iter().flat_map(|m| m.functions).collect();
+    let (functions, skipped) =
+        filter_rust_test_functions(&rust_package_root(input), functions, include_tests);
+    Ok((
+        Lowered {
+            generator: "vikt-rs/rustc_public".to_owned(),
+            functions,
+            profile: PanelProfile::Instruction,
+        },
+        skipped,
+    ))
 }
 
-fn ast_rust_package(input: &Path) -> Result<Lowered, Box<dyn std::error::Error>> {
+/// Drops every function whose source file matches [`language::Language::Rust`]'s
+/// registry test-path convention (`benches`/`examples`/`test`/`tests`
+/// directories - Rust's unit tests live behind `#[cfg(test)]` and are never
+/// lowered here at all) unless `include_tests` is set, in which case
+/// `functions` passes through untouched and the count is `0` — this is what
+/// makes `--include-tests` restore the exact old behavior for a cargo
+/// package's own sources, the same way it does for a folder walk. Shares
+/// [`language::Language::is_test_path`] with `calibrate`'s own
+/// `score_crate` filter so the two default policies can never diverge.
+fn filter_rust_test_functions(
+    root: &Path,
+    functions: Vec<FunctionIr>,
+    include_tests: bool,
+) -> (Vec<FunctionIr>, usize) {
+    if include_tests {
+        return (functions, 0);
+    }
+    let mut skipped_files = std::collections::BTreeSet::new();
+    let kept = functions
+        .into_iter()
+        .filter(|ir| {
+            let file = PathBuf::from(&ir.id.file);
+            let rel = file.strip_prefix(root).unwrap_or(&file).to_path_buf();
+            if language::Language::Rust.is_test_path(&rel) {
+                skipped_files.insert(rel);
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    (kept, skipped_files.len())
+}
+
+fn ast_rust_package(
+    input: &Path,
+    include_tests: bool,
+) -> Result<(Lowered, usize), Box<dyn std::error::Error>> {
     let root = rust_package_root(input);
     let mut functions = Vec::new();
+    let mut skipped = 0;
     for rel in walk_rust_sources(&root)? {
+        if !include_tests && language::Language::Rust.is_test_path(&rel) {
+            skipped += 1;
+            continue;
+        }
         let abs = root.join(&rel);
         match vikt_ts::lower_file(&abs) {
             Ok(lowered) => functions.extend(lowered.functions),
             Err(e) => eprintln!("vikt: skipping {}: {e}", rel.display()),
         }
     }
-    Ok(Lowered {
-        generator: "vikt-ts/tree-sitter-rust".to_owned(),
-        functions,
-        profile: PanelProfile::Statement,
-    })
+    Ok((
+        Lowered {
+            generator: "vikt-ts/tree-sitter-rust".to_owned(),
+            functions,
+            profile: PanelProfile::Statement,
+        },
+        skipped,
+    ))
 }
 
 /// The package root a `.rs` input resolves to: itself if it's already a
@@ -371,6 +436,12 @@ fn walk_registry_sources_into(
 /// folder should not block scoring the rest of it, the policy `calibrate`'s
 /// tree scan already uses.
 ///
+/// Unless `include_tests` is set, a file [`language::is_test_source`] marks
+/// as a test is skipped by default — the same registry conventions
+/// `calibrate` already applies, shared through that one predicate rather
+/// than a second copy of the rules. The second element of the returned pair
+/// counts how many were skipped this way, for the caller's stderr note.
+///
 /// # Errors
 ///
 /// Any I/O failure walking `root` itself; per-file lowering failures are
@@ -380,10 +451,16 @@ pub fn lower_folder(
     python: &str,
     lowering: Lowering,
     skip: &[language::InputKind],
-) -> std::io::Result<Vec<Lowered>> {
+    include_tests: bool,
+) -> std::io::Result<(Vec<Lowered>, usize)> {
     let mut out = Vec::new();
+    let mut skipped = 0;
     for (rel, kind) in walk_registry_sources(root)? {
         if skip.contains(&kind) {
+            continue;
+        }
+        if !include_tests && language::is_test_source(&rel) {
+            skipped += 1;
             continue;
         }
         let abs = root.join(&rel);
@@ -392,7 +469,7 @@ pub fn lower_folder(
             Err(e) => eprintln!("vikt: skipping {}: {e}", rel.display()),
         }
     }
-    Ok(out)
+    Ok((out, skipped))
 }
 
 /// Lowers one file through whichever frontend `kind` selects — [`lower_folder`]'s

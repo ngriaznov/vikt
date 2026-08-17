@@ -112,6 +112,39 @@ pub fn is_typescript(rel: &Path) -> bool {
         .is_some_and(|e| ext::TYPESCRIPT.contains(&e))
 }
 
+/// The registry [`Language`] that owns `ext`'s conventions, if any — the
+/// same per-extension resolution `calibrate`'s tree walk performs inline
+/// (see its `walk`), pulled out so a directory or cargo-package walk's
+/// default test-skip and `calibrate`'s own per-language filtering read off
+/// exactly the same tables and can never diverge. `.class` owns no
+/// `Language` — calibrate can analyze bytecode but never mutate it — so it
+/// never matches here.
+#[must_use]
+pub fn language_for_ext(ext: &str) -> Option<Language> {
+    [
+        Language::Python,
+        Language::JavaScript,
+        Language::Rust,
+        Language::Java,
+        Language::Kotlin,
+        Language::Go,
+    ]
+    .into_iter()
+    .find(|lang| lang.extensions().contains(&ext))
+}
+
+/// True when `rel`'s extension is owned by a registry [`Language`] and that
+/// language's [`Language::is_test_path`] convention marks it a test file —
+/// the shared predicate behind a folder or cargo-package walk's default
+/// test-skip ([`crate::lowering::walk_registry_sources`] and friends).
+#[must_use]
+pub fn is_test_source(rel: &Path) -> bool {
+    rel.extension()
+        .and_then(|e| e.to_str())
+        .and_then(language_for_ext)
+        .is_some_and(|lang| lang.is_test_path(rel))
+}
+
 /// A language `calibrate` can mutate and score. `.class` inputs are
 /// analyzable but not calibratable: no mutation engine exists for compiled
 /// bytecode, and the scope error names it honestly rather than claiming it
@@ -446,6 +479,55 @@ mod tests {
         // guarantee `rust_closure_synthetic_only_under_the_mir_primary`
         // pins for the fallback synthetic form.
         assert!(!Language::Rust.is_synthetic("add", true));
+    }
+
+    /// `language_for_ext` resolves each registry extension to exactly the
+    /// `Language` whose own `extensions()` table owns it - the JVM split
+    /// (`.java` vs `.kt`/`.kts`) included - and `.class` and any unknown
+    /// extension own no `Language` at all.
+    #[test]
+    fn language_for_ext_matches_the_owning_registry_table() {
+        assert_eq!(language_for_ext("py"), Some(Language::Python));
+        assert_eq!(language_for_ext("ts"), Some(Language::JavaScript));
+        assert_eq!(language_for_ext("rs"), Some(Language::Rust));
+        assert_eq!(language_for_ext("java"), Some(Language::Java));
+        assert_eq!(language_for_ext("kt"), Some(Language::Kotlin));
+        assert_eq!(language_for_ext("kts"), Some(Language::Kotlin));
+        assert_eq!(language_for_ext("go"), Some(Language::Go));
+        assert_eq!(language_for_ext("class"), None);
+        assert_eq!(language_for_ext("rb"), None);
+    }
+
+    /// `is_test_source` is `language_for_ext` composed with
+    /// `Language::is_test_path` - one positive and one negative case per
+    /// registry language, plus the two cases the registry deliberately does
+    /// NOT flag: a Go helper file that merely starts with `test_` (only the
+    /// `_test.go` suffix is the Go convention) and any `.class` path (no
+    /// owning `Language` at all).
+    #[test]
+    fn is_test_source_per_language() {
+        assert!(is_test_source(Path::new("pkg/test_foo.py")));
+        assert!(!is_test_source(Path::new("pkg/foo.py")));
+
+        assert!(is_test_source(Path::new("src/foo.test.ts")));
+        assert!(!is_test_source(Path::new("src/foo.ts")));
+
+        assert!(is_test_source(Path::new("benches/foo.rs")));
+        assert!(!is_test_source(Path::new("src/foo.rs")));
+
+        assert!(is_test_source(Path::new("com/example/CheckoutTest.java")));
+        assert!(!is_test_source(Path::new("com/example/Checkout.java")));
+
+        assert!(is_test_source(Path::new("com/example/CheckoutTest.kt")));
+        assert!(!is_test_source(Path::new("com/example/Checkout.kt")));
+
+        assert!(is_test_source(Path::new("pkg/checkout_test.go")));
+        assert!(!is_test_source(Path::new("pkg/checkout.go")));
+        // Named like a test helper, but the Go registry convention is the
+        // `_test.go` suffix, not a `test_` prefix - stays scored.
+        assert!(!is_test_source(Path::new("pkg/test_helpers.go")));
+
+        assert!(!is_test_source(Path::new("com/example/CheckoutTest.class")));
     }
 
     /// Rust and Go keep a sensible `--build-cmd` default; Java and Kotlin

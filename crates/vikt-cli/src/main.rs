@@ -188,6 +188,12 @@ struct Args {
     #[arg(long, value_enum, default_value_t = Lowering::Auto)]
     lowering: Lowering,
 
+    /// Score test files too: a directory or cargo-package input skips
+    /// anything matching the registry's per-language test-path convention
+    /// by default (an explicitly named single-file input always scores).
+    #[arg(long)]
+    include_tests: bool,
+
     /// Skip function bodies larger than this many instructions (0 = no limit).
     ///
     /// The analysis is quadratic in body size, and every body ever observed
@@ -506,7 +512,12 @@ fn lower_crate_input(
     let root = lowering::rust_package_root(input);
     // Whole package through cargo: every source file of the primary
     // package, dependencies compiled but not analyzed.
-    let lowered = lowering::lower_rust_crate(input, args.package.as_deref(), args.lowering)?;
+    let (lowered, mut skipped) = lowering::lower_rust_crate(
+        input,
+        args.package.as_deref(),
+        args.lowering,
+        args.include_tests,
+    )?;
     let rust_profile = lowered.profile;
     let mut generators: BTreeSet<String> = [lowered.generator].into_iter().collect();
     let mut functions: Vec<FnInput> = lowered
@@ -518,12 +529,14 @@ fn lower_crate_input(
         })
         .collect();
 
-    let extra = lowering::lower_folder(
+    let (extra, extra_skipped) = lowering::lower_folder(
         &root,
         &args.python,
         args.lowering,
         &[language::InputKind::Rust],
+        args.include_tests,
     )?;
+    skipped += extra_skipped;
     if !extra.is_empty() {
         eprintln!(
             "vikt: note: {} non-Rust source file(s) alongside the cargo package also lowered",
@@ -540,11 +553,22 @@ fn lower_crate_input(
                 .map(|ir| FnInput { ir, profile }),
         );
     }
+    report_skipped_tests(skipped);
 
     Ok((
         generators.into_iter().collect::<Vec<_>>().join(", "),
         functions,
     ))
+}
+
+/// The stderr note a directory or cargo-package input prints when its
+/// default test-skip actually dropped something — never printed under
+/// `--include-tests` (`skipped` is always `0` there) and never for the JSON
+/// itself, which carries no such note.
+fn report_skipped_tests(skipped: usize) {
+    if skipped > 0 {
+        eprintln!("vikt: skipped {skipped} test file(s) (--include-tests to score them)");
+    }
 }
 
 /// A plain directory with no `Cargo.toml`: every registry-known source file
@@ -556,7 +580,9 @@ fn lower_folder_input(
     input: &Path,
     args: &Args,
 ) -> Result<(String, Vec<FnInput>), Box<dyn std::error::Error>> {
-    let files = lowering::lower_folder(input, &args.python, args.lowering, &[])?;
+    let (files, skipped) =
+        lowering::lower_folder(input, &args.python, args.lowering, &[], args.include_tests)?;
+    report_skipped_tests(skipped);
     if files.is_empty() {
         return Err(format!(
             "no supported source files found under {} (expected one of {})",
