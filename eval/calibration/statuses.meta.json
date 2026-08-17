@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/jshttp/statuses.git",
+  "commit": "770a97d931c1bb40ebbfefdbb77f0419601890b5",
+  "language": "javascript",
+  "test_cmd": "npx mocha --reporter min --check-leaks --bail test/",
+  "mutants_executed": 65,
+  "invalid": 0,
+  "panel_rho": -0.007,
+  "null_rho": 0.097,
+  "verdict": "uncalibrated"
+}
