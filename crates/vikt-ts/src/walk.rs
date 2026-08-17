@@ -15,8 +15,8 @@
 //!
 //! There is no symbol table here - just node-kind pattern matching - so
 //! def/use comes from a shadowing-aware name-based scope stack instead of
-//! true binding resolution. A `block_scoped` language (Rust, Java, Kotlin)
-//! pushes a fresh scope per `block`, so `let x`/a local declaration in a
+//! true binding resolution. A `block_scoped` language (Rust, Java, Kotlin,
+//! Go) pushes a fresh scope per `block`, so `let x`/a local declaration in a
 //! nested block never clobbers an outer `x`; a non-block-scoped language
 //! (Python) keeps one scope for the whole function, matching real Python
 //! scoping (only `def` introduces scope). Names that resolve to nothing in

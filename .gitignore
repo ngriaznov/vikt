@@ -11,3 +11,8 @@ demo/**/*.jar
 corpus/
 eval/corpus-logs/
 tools/rust-lower/target/
+
+# Left behind when a calibrate-* fixture's own build command is run in
+# place instead of against the temp copy calibrate normally uses.
+crates/vikt-cli/tests/fixtures/calibrate-java/out/
+crates/vikt-cli/tests/fixtures/calibrate-kotlin/test.jar

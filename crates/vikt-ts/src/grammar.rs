@@ -147,15 +147,16 @@ pub(crate) struct GrammarTable {
     /// A dedicated compound-assignment node kind, e.g. Rust's
     /// `compound_assignment_expr`, Python's `augmented_assignment`. Empty
     /// for a language that reuses `assign_kinds` for both and disambiguates
-    /// via `assign_operator_field`'s text instead (Java, Kotlin: one
+    /// via `assign_operator_field`'s text instead (Java, Kotlin, Go: one
     /// `assignment_expression`/`assignment` kind, `+=` vs `=` is just the
     /// operator field's text).
     pub compound_assign_kinds: &'static [&'static str],
     pub assign_operator_field: &'static str,
     /// Whether a plain-variable assignment target declares (Python: the only
     /// binding form, reusing the slot on re-assignment) or must resolve an
-    /// existing binding (Rust/Java/Kotlin: `x = 1` is only legal after some
-    /// prior declaration).
+    /// existing binding (Rust/Java/Kotlin/Go: `x = 1` is only legal after
+    /// some prior declaration — Go's declaring form is `:=`, modeled
+    /// separately via `binding_kinds2`, above).
     pub assign_declares: bool,
     pub assign_left_field: &'static str,
     pub assign_right_field: &'static str,
@@ -207,15 +208,17 @@ pub(crate) struct GrammarTable {
     /// An unconditional loop with no condition to evaluate at all, e.g.
     /// Rust's `loop { .. }` (as opposed to `while true { .. }`, which is a
     /// real `while_kinds` node with a literal condition). Empty for every
-    /// other language modeled here - Python, Java and Kotlin have no
-    /// condition-less loop form.
+    /// other language modeled here - Python, Java, Kotlin and Go have no
+    /// dedicated condition-less loop node (Go's bare `for {}` is instead
+    /// recognized structurally by `for_range_kind`'s shape probe, below).
     pub loop_kinds: &'static [&'static str],
     pub loop_body_field: &'static str,
 
     /// A for-each loop: pattern/binding, iterated value, body. None of the
-    /// four languages' tables here model a C-style three-clause `for` (Java's
+    /// five languages' tables here model a C-style three-clause `for` (Java's
     /// plain `for_statement` falls back to a generic unit — a documented v1
-    /// simplification, since `enhanced_for_statement` is the idiomatic form).
+    /// simplification, since `enhanced_for_statement` is the idiomatic form;
+    /// Go's `for_clause` shape gets the same treatment, below).
     pub for_kinds: &'static [&'static str],
     pub for_pattern_field: &'static str,
     pub for_value_field: &'static str,

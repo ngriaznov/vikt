@@ -254,7 +254,11 @@ classification and a ranking:
 - **Not criterion-anchored.** Classic slicing answers "what affects *this*".
   This answers "what carries behavior at all", unconditionally — so it is
   computed once and cached rather than recomputed per question.
-- **Not repo-level ranking.** The unit is the statement inside one body.
+- **The unit stays the statement inside one body.** File and repo scope
+  (see below) blend in a function's standing among its neighbours — but only
+  as an additive reweighting on top of the intraprocedural analysis above;
+  nothing here builds an interprocedural dataflow or points-to graph, and
+  the base per-statement tiers are exactly as intraprocedural as ever.
 
 ## Architecture
 
@@ -265,9 +269,16 @@ vikt-core   language-neutral. Dominance, post-dominance, control dependence,
       ^
       |  FunctionIr  (the contract: line, defs, uses, successors, kind)
       |
-vikt-jvm    .class -> mokapot MokaIR -> FunctionIr
-vikt-py     .py -> CPython dis -> JSON -> FunctionIr
-vikt-cli    the `vikt` binary
+vikt-jvm    .class -> mokapot MokaIR -> FunctionIr           (bytecode, instruction-granular)
+vikt-py     .py -> CPython dis -> JSON -> FunctionIr         (bytecode, instruction-granular)
+vikt-rs     .rs -> MIR via a nightly-pinned rustc_public helper -> FunctionIr (MIR)
+vikt-js     .js/.ts -> oxc AST + constructed CFG -> FunctionIr (statement-granular)
+vikt-ts     .py/.java/.kt/.rs/.go source -> tree-sitter AST -> FunctionIr
+                (one generic walker plus a per-language grammar table;
+                the fallback lowering everywhere above except JS/TS, and
+                the only lowering Java, Kotlin and Go have)
+vikt-cli    the `vikt` binary — dispatches to whichever frontend the input
+                and `--lowering` select
 ```
 
 The seam is `FunctionIr`. A frontend answers four questions per instruction —
@@ -641,25 +652,30 @@ enters that loop.
 
 ## Tests
 
-112 tests: 32 in the core over hand-built IR (pinning each instrument's
-algorithm and the panel's weights rather than any frontend's lowering), 17
-integration tests over the analysis pipeline, 10 over the SARIF projection
-and the calibration statistics, 11 over real SMAP attribute text and
-synthetic state machines, 8 over real `javac -g` and `kotlinc` output, 5
-over real CPython bytecode, 4 over the Python mutant generator, 10 over
-real oxc lowering of JavaScript and TypeScript, 4 over real MIR lowering
-of Rust, 10 over the CLI (including a calibration run that asserts the
-input tree comes out byte-identical), 1 doctest. The JVM, Python and JS suites assert
-the *same* behavioral claims against equivalent source — the accumulator
-that reaches a state write is core, the counter that only feeds logging is
-inert — which is the multi-language claim stated as a test.
+249 tests: 47 in the core over hand-built IR (pinning each instrument's
+algorithm, the panel's weights, the file/repo-scope blend, and the
+cross-language mutation-masking rules shared by the tree-sitter calibration
+engines — none of it any frontend's lowering), 17 integration tests over the
+analysis pipeline, 10 over the SARIF projection and the calibration
+statistics, 11 over real SMAP attribute text and synthetic state machines, 8
+over real `javac -g` and `kotlinc` output, 5 over real CPython bytecode, 4
+over the Python mutant generator, 17 over real oxc lowering of JavaScript
+and TypeScript, 11 over real MIR lowering of Rust and its masked-token
+mutation splicer, 59 over the generic tree-sitter walker across Python,
+Java, Kotlin, Rust and Go source (`vikt-ts`, one suite per grammar table),
+59 over the CLI (including a calibration run per language and a folder-walk
+that asserts the input tree comes out byte-identical), 1 doctest. The JVM,
+Python and JS suites assert the *same* behavioral claims against equivalent
+source — the accumulator that reaches a state write is core, the counter
+that only feeds logging is inert — which is the multi-language claim stated
+as a test.
 
 ```bash
 cargo test
 ```
 
-JVM, Kotlin and Python tests skip rather than fail when no JDK, `kotlinc` or
-interpreter is present.
+JVM, Kotlin, Go and Python tests skip rather than fail when no JDK,
+`kotlinc`, `go` or interpreter is present.
 
 ## Development setup
 

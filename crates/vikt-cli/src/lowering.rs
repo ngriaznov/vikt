@@ -32,8 +32,8 @@ pub enum Lowering {
     Auto,
     /// Require the primary; error exactly as it always has if it's
     /// unavailable. The unaffected choice for `.class` (bytecode is the
-    /// only lowering there) and `.java`/`.kt` source (tree-sitter is the
-    /// only lowering there - see `lower_ts_source`).
+    /// only lowering there) and `.java`/`.kt`/`.go` source (tree-sitter is
+    /// the only lowering there - see `lower_ts_source`).
     Primary,
     /// Force the tree-sitter fallback even where the primary would work.
     /// An error, not a no-op, for `.js`/`.ts`: `vikt-js`'s oxc frontend
