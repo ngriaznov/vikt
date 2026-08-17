@@ -2,7 +2,8 @@
 //!
 //! Used whenever a primary lowering is unavailable - Rust without the MIR
 //! helper, Python without `python3` - and as the only path for source-level
-//! `.java`/`.kt` analysis (today only compiled `.class` is analyzable).
+//! `.java`/`.kt`/`.go` analysis (today only compiled `.class` is analyzable
+//! on the JVM side, and Go has no bytecode/MIR frontend at all).
 //!
 //! One [`walk`] engine drives every language, table-selected by
 //! [`Language`]: a per-language [`grammar::GrammarTable`] maps tree-sitter
@@ -11,11 +12,12 @@
 //! writes). Every lowering here is statement-granular - see [`walk`]'s
 //! module docs for why and for the known v1 simplifications.
 //!
-//! All four languages have complete tables. `Language::Java` and
-//! `Language::Kotlin` are also the *only* path for source-level `.java`/
-//! `.kt` analysis - today's other frontends only read compiled `.class`
+//! All five languages have complete tables. `Language::Java` and
+//! `Language::Kotlin` are the *only* path for source-level `.java`/`.kt`
+//! analysis - today's other JVM frontend only reads compiled `.class`
 //! bytecode, so tree-sitter is not a fallback for these two, it's new
-//! capability.
+//! capability. `Language::Go` is likewise the only lowering Go has ever
+//! had - there is no bytecode/MIR primary to fall back from.
 
 mod grammar;
 mod walk;
@@ -32,6 +34,7 @@ pub enum Language {
     Python,
     Java,
     Kotlin,
+    Go,
 }
 
 impl Language {
@@ -43,6 +46,7 @@ impl Language {
             "py" => Some(Self::Python),
             "java" => Some(Self::Java),
             "kt" | "kts" => Some(Self::Kotlin),
+            "go" => Some(Self::Go),
             _ => None,
         }
     }
@@ -53,6 +57,7 @@ impl Language {
             Self::Python => tree_sitter_python::LANGUAGE.into(),
             Self::Java => tree_sitter_java::LANGUAGE.into(),
             Self::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
         }
     }
 
@@ -62,6 +67,7 @@ impl Language {
             Self::Python => &grammar::PYTHON,
             Self::Java => &grammar::JAVA,
             Self::Kotlin => &grammar::KOTLIN,
+            Self::Go => &grammar::GO,
         }
     }
 }

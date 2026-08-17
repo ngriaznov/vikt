@@ -121,9 +121,10 @@ lowering - there is no separate bytecode/MIR primary to skip"
     })
 }
 
-/// Lowers a `.java`/`.kt` source file. There is no bytecode-reading primary
-/// at source level - only compiled `.class` has one - so every value of
-/// `lowering` resolves to the same tree-sitter lowering; this is new
+/// Lowers a `.java`/`.kt`/`.go` source file. There is no bytecode/MIR
+/// primary for any of them - Java/Kotlin's only compiled route is `.class`;
+/// Go has no compiled-artifact route in this crate at all - so every value
+/// of `lowering` resolves to the same tree-sitter lowering; this is new
 /// capability, not a fallback with a choice to make.
 ///
 /// # Errors
@@ -419,7 +420,7 @@ fn lower_one(
         }
         language::InputKind::Python => lower_python(path, python, lowering),
         language::InputKind::JsTs => lower_js(path, lowering),
-        language::InputKind::JvmSource => lower_ts_source(path),
+        language::InputKind::JvmSource | language::InputKind::GoSource => lower_ts_source(path),
         language::InputKind::Rust => lower_rust_file(path, lowering),
     }
 }

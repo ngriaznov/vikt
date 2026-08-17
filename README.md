@@ -130,7 +130,7 @@ showed the instruments are not equally portable between graph shapes:
 - **`Instruction`**: for bytecode/MIR frontends (JVM, CPython, Rust). The
   table above.
 - **`Statement`**: for every AST-granular frontend — JS/TS (oxc) and the
-  tree-sitter fallback (Rust/Python/Java/Kotlin; see below). Refit on blind
+  tree-sitter fallback (Rust/Python/Java/Kotlin/Go; see below). Refit on blind
   JavaScript / TypeScript labels (9 functions from lodash, express and zod,
   committed before measurement): strahler and trophic rise to the top
   instrument weights while schur and pivot fall, because statement-granular
@@ -309,6 +309,7 @@ Implement one function: substrate → `Vec<FunctionIr>`.
 | Python | CPython bytecode via `dis` | PEP 626 `co_lines()`, exact | **working** |
 | JS/TS | oxc semantic-resolved AST + constructed CFG | AST spans, exact | **working** — see `vikt-js` |
 | Rust | MIR via `rustc_public`, through a nightly-pinned helper | MIR spans, macro expansions dropped as foreign | **working** — see below |
+| Go | tree-sitter AST (`vikt-ts`) | AST spans, exact | **working** — analyzable, not yet calibratable |
 | C/C++/Swift | LLVM IR `DILocation` | debug info | not attempted |
 
 Rust analysis needs one extra build step: `rustc_public` is nightly-only, so
@@ -348,12 +349,14 @@ Only Rust keeps a bytecode-class primary: the MIR helper measured well
 ahead of the AST lowering (rho 0.868 vs 0.601 on identical mutants), so
 `auto` uses it whenever `vikt-rust-lower` is present and falls back to
 tree-sitter otherwise — logged, never silent. Everything else scores
-through an AST: JS/TS via oxc as always, and Python, Java and Kotlin
+through an AST: JS/TS via oxc as always, and Python, Java, Kotlin and Go
 source via a generic tree-sitter walker (`vikt-ts`, one walker plus a
 per-language grammar table). Python's bytecode lowering measured *behind*
 the AST head-to-head (0.635 vs 0.651), so the AST is its default with no
 interpreter needed; `.class` files still analyze as bytecode, and
-`.java`/`.kt` source is a new capability. Every tree-sitter lowering is
+`.java`/`.kt`/`.go` source is a new capability — Go has no bytecode/MIR
+substrate in this project at all, so tree-sitter is not a fallback for it,
+it's the only lowering it has ever had. Every tree-sitter lowering is
 statement-granular, scores under `Statement`, and names its grammar in the
 sidecar's `generator` field (`vikt-ts/tree-sitter-rust`, etc.).
 `--lowering <auto|primary|ast>`, on `analyze` and `calibrate` both: `auto`
@@ -375,6 +378,7 @@ vikt Foo.class --no-denylist            # treat nothing as inert
 vikt app.ts                             # TS/JS: statement-profile panel
 vikt lib.rs                             # Rust via MIR (build tools/rust-lower once)
 vikt Foo.java                           # Java source, tree-sitter (new capability)
+vikt foo.go                             # Go source, tree-sitter (the only lowering it has)
 vikt path/to/package --package foo      # whole cargo package, deps compiled not analyzed
 vikt path/to/folder                     # any directory: every known extension, one sidecar
 vikt path/to/repo --scope repo          # call-graph blend across the whole run, not just one file

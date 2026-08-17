@@ -28,6 +28,11 @@ pub mod ext {
     /// JVM-language sources, lowered from source by the tree-sitter
     /// frontend (the `.class` route stays the bytecode path).
     pub const JVM_SOURCE: &[&str] = &["java", "kt", "kts"];
+    /// Go sources, lowered from source by the tree-sitter frontend - there
+    /// is no bytecode/MIR primary to fall back from at all, same as
+    /// [`JVM_SOURCE`] but for a language with no compiled-artifact route
+    /// either.
+    pub const GO: &[&str] = &["go"];
 }
 
 /// Directory names a source walk never descends into, beyond anything
@@ -47,6 +52,7 @@ pub enum InputKind {
     JsTs,
     JvmSource,
     Rust,
+    GoSource,
 }
 
 /// Classifies an extension, or `None` for anything no frontend takes.
@@ -63,6 +69,8 @@ pub fn classify(extension: &str) -> Option<InputKind> {
         Some(InputKind::JvmSource)
     } else if ext::RUST.contains(e) {
         Some(InputKind::Rust)
+    } else if ext::GO.contains(e) {
+        Some(InputKind::GoSource)
     } else {
         None
     }
@@ -72,12 +80,19 @@ pub fn classify(extension: &str) -> Option<InputKind> {
 /// derived from the same tables dispatch reads, so the message cannot drift.
 #[must_use]
 pub fn supported_extensions() -> String {
-    [ext::CLASS, ext::PYTHON, ext::JS, ext::JVM_SOURCE, ext::RUST]
-        .concat()
-        .iter()
-        .map(|e| format!(".{e}"))
-        .collect::<Vec<_>>()
-        .join(", ")
+    [
+        ext::CLASS,
+        ext::PYTHON,
+        ext::JS,
+        ext::JVM_SOURCE,
+        ext::RUST,
+        ext::GO,
+    ]
+    .concat()
+    .iter()
+    .map(|e| format!(".{e}"))
+    .collect::<Vec<_>>()
+    .join(", ")
 }
 
 /// True for `.ts`/`.mts`/`.cts`/`.tsx` — the extensions the TypeScript
@@ -235,7 +250,15 @@ mod tests {
     /// tables are disjoint, so dispatch can never be order-dependent.
     #[test]
     fn extension_tables_are_disjoint() {
-        let all = [ext::CLASS, ext::PYTHON, ext::JS, ext::JVM_SOURCE, ext::RUST].concat();
+        let all = [
+            ext::CLASS,
+            ext::PYTHON,
+            ext::JS,
+            ext::JVM_SOURCE,
+            ext::RUST,
+            ext::GO,
+        ]
+        .concat();
         let mut seen = std::collections::BTreeSet::new();
         for e in &all {
             assert!(seen.insert(*e), "extension {e:?} appears in two tables");
@@ -254,6 +277,7 @@ mod tests {
             (ext::JS, InputKind::JsTs),
             (ext::JVM_SOURCE, InputKind::JvmSource),
             (ext::RUST, InputKind::Rust),
+            (ext::GO, InputKind::GoSource),
         ] {
             for e in exts {
                 assert_eq!(classify(e), Some(kind), "{e}");

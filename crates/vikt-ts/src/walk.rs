@@ -24,27 +24,40 @@
 //! the same "unresolved reference still tracks a flow" treatment `vikt-js`
 //! gives ambient JS globals.
 //!
-//! # Classes
+//! # Classes and Go methods
 //!
 //! A `class_kinds` node (Java/Kotlin only) isn't its own `FunctionIr`: its
 //! methods are collected and named `Type::method`, matching the JVM
 //! frontend's naming shape (see `owner_prefix`), and its direct field/
 //! property declarations are lowered as ordinary statements into the
 //! `<module>` wrapper, at module scope - not nested inside any per-class
-//! scope, since this frontend does not model class-level shadowing.
+//! scope, since this frontend does not model class-level shadowing. Go has
+//! no class body at all - a method is a top-level `function_kinds` sibling
+//! carrying its own `receiver` field - so it gets the identical
+//! `Type::method` naming through a different route, `receiver_owner`
+//! (checked only when `owner_prefix`'s ancestor search finds nothing).
 //!
 //! # Unfielded grammars
 //!
-//! `tree-sitter-rust`, `-python` and `-java` field essentially everything
-//! this walker reads. `tree-sitter-kotlin-ng` doesn't: `call_expression`,
-//! `navigation_expression`, `for_statement`, `property_declaration` and
-//! `if_expression`'s then/else are unfielded on their parent (verified
-//! against the crate's own `node-types.json`). Every slot that can be
-//! affected takes both a field name and a kind-search or positional
-//! fallback in [`GrammarTable`]; the `field_or_*` helpers below try the
-//! field first and only fall back when it's empty or absent, so Rust/
-//! Python/Java - whose fields always resolve - never take the fallback
-//! path.
+//! `tree-sitter-rust`, `-python`, `-java` and `-go` field essentially
+//! everything this walker reads. `tree-sitter-kotlin-ng` doesn't:
+//! `call_expression`, `navigation_expression`, `for_statement`,
+//! `property_declaration` and `if_expression`'s then/else are unfielded on
+//! their parent (verified against the crate's own `node-types.json`). Every
+//! slot that can be affected takes both a field name and a kind-search or
+//! positional fallback in [`GrammarTable`]; the `field_or_*` helpers below
+//! try the field first and only fall back when it's empty or absent, so
+//! Rust/Python/Java/Go - whose fields always resolve - never take the
+//! fallback path. Go's own irregularity is different in kind, not degree:
+//! `block` wraps its statements one level down in an unfielded
+//! `statement_list` (see `GrammarTable::wrapper_kinds`/`block_kinds`'s
+//! docs), `var`/`const` declarations splice a variable number of specs into
+//! the surrounding sequence (`GrammarTable::flatten_kinds`), and
+//! `for_statement` is one grammar kind covering four different loop shapes
+//! (`GrammarTable::for_range_kind`/`for_clause_kind`, `lower_go_for`) -
+//! none of these fit the single-slot field-vs-fallback model above, so each
+//! gets its own dedicated (but still table-driven, empty everywhere but Go)
+//! handling instead.
 //!
 //! # Match
 //!
@@ -114,6 +127,24 @@
 //!   containing statement stays one opaque unit (inner calls are still
 //!   extracted; inner control flow is not) - only when one of these three
 //!   constructs is itself the statement does `lower_stmt` dispatch into it.
+//! - Go's three-clause `for` (`for i := 0; i < n; i++ {}`) falls back to the
+//!   generic unit, the same gap as Java's plain `for_statement` above; only
+//!   the bare-condition, unconditional and range (for-each) forms are
+//!   modeled. Go's type switch (`switch v := x.(type) { .. }`) is a
+//!   distinct grammar kind from a value switch and is likewise unmodeled.
+//!   `i++`/`i--` are a bare identifier plus an anonymous token, no
+//!   operator/left/right field to key off of, so they fall back too: the
+//!   identifier is a use, not also a def. A `go`/`defer` statement is not
+//!   itself a call - it wraps exactly one - so it also takes the generic
+//!   fallback, which still extracts that inner call as an ordinary `Call`
+//!   node ahead of the statement's own opaque unit; no concurrency
+//!   semantics are modeled for `go` beyond that (see `GO`'s doc comment in
+//!   `grammar.rs`).
+//! - Go's func literals (closures) are not lowered as their own
+//!   `FunctionIr` - `GrammarTable::closure_kinds` is empty for Go, so a
+//!   `func(){ .. }`'s calls and identifiers are swept into whatever
+//!   statement contains it, the same "coarser, never wrong" treatment
+//!   Java's unmodeled `object_creation_expression` body gets.
 
 use std::collections::BTreeMap;
 
@@ -231,6 +262,31 @@ fn owner_prefix(table: &'static GrammarTable, fnode: Node<'_>, source: &str) -> 
     None
 }
 
+/// A method's owning-type name read off its own `receiver_field`, for a
+/// language whose methods are top-level siblings rather than nested inside
+/// a `class_kinds` body - Go's `method_declaration.receiver`, a one-
+/// parameter `parameter_list` (`(c *Counter)` or `(c Counter)`). Unwraps a
+/// `receiver_pointer_kind` wrapper one level so a pointer receiver names the
+/// same owner a value receiver would. `None` when `receiver_field` is empty
+/// (every language but Go), the node has no receiver at all (a plain
+/// function, not a method), or the receiver's shape doesn't match.
+fn receiver_owner(table: &'static GrammarTable, fnode: Node<'_>, source: &str) -> Option<String> {
+    if table.receiver_field.is_empty() {
+        return None;
+    }
+    let receiver = fnode.child_by_field_name(table.receiver_field)?;
+    let mut cursor = receiver.walk();
+    let param = receiver.named_children(&mut cursor).next()?;
+    let ty = param.child_by_field_name(table.receiver_type_field)?;
+    let ty = if ty.kind() == table.receiver_pointer_kind {
+        let mut inner_cursor = ty.walk();
+        ty.named_children(&mut inner_cursor).next()?
+    } else {
+        ty
+    };
+    ty.utf8_text(source.as_bytes()).ok().map(str::to_owned)
+}
+
 /// `child_by_field_name`, falling back to the first named child of `kind`
 /// when the field is unused (empty) or absent - Kotlin doesn't field
 /// `function_body`, `function_value_parameters` or `class_body` on their
@@ -276,6 +332,30 @@ fn field_or_last<'t>(node: Node<'t>, field: &str) -> Option<Node<'t>> {
     }
     let mut cursor = node.walk();
     node.named_children(&mut cursor).last()
+}
+
+/// Whether `node` is itself a `member_access_kinds` node, or wraps exactly
+/// one such node as its only named child - Go's assignment `left`/`right`
+/// fields are always an `expression_list`, even for a single plain target
+/// (`c.total = ..` parses as `left: expression_list { selector_expression
+/// }`), so the member-access check in `lower_assign` has to see through
+/// that one-element wrapper to still classify a field write through a
+/// receiver as a `StateWrite`. Multi-target assignment (`a, b = f()`) is
+/// left alone - `is_member` stays `false` for it even when one of several
+/// targets happens to be a member access, a deliberate simplification:
+/// state-write detection only ever meant a single simple target. A no-op
+/// for every other language, whose `assign_left_field` is never itself a
+/// wrapper around the real target.
+fn is_member_target(table: &GrammarTable, node: Node<'_>) -> bool {
+    if table.member_access_kinds.contains(&node.kind()) {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let mut children = node.named_children(&mut cursor);
+    match (children.next(), children.next()) {
+        (Some(only), None) => table.member_access_kinds.contains(&only.kind()),
+        _ => false,
+    }
 }
 
 /// Resolves a member-access node's object/property children, falling back
@@ -333,10 +413,16 @@ pub(crate) fn lower_module(
                 .child_by_field_name(table.function_name_field)
                 .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                 .unwrap_or("<anon>");
-            owner_prefix(table, fnode, source).map_or_else(
-                || bare_name.to_owned(),
-                |owner| format!("{owner}::{bare_name}"),
-            )
+            // Ancestor-based (Java, Kotlin: a `class_kinds` body) first,
+            // then receiver-based (Go: no class ancestor at all, the owner
+            // lives on the method node's own `receiver` field) - the two
+            // are mutually exclusive per table, never both non-empty.
+            owner_prefix(table, fnode, source)
+                .or_else(|| receiver_owner(table, fnode, source))
+                .map_or_else(
+                    || bare_name.to_owned(),
+                    |owner| format!("{owner}::{bare_name}"),
+                )
         };
         names.insert(fnode.id(), name.clone());
         let decl_line = line_of(fnode);
@@ -976,6 +1062,13 @@ impl<'t> FnCtx<'t> {
         if t.block_kinds.contains(&kind) {
             return self.lower_block(node, open);
         }
+        if t.flatten_kinds.contains(&kind) {
+            // Go's `var`/`const` declarations: every named child (one
+            // `var_spec`/`const_spec` per declared name-or-group) becomes
+            // its own statement, spliced into the caller's own scope rather
+            // than a fresh one - see `GrammarTable::flatten_kinds`.
+            return self.lower_block_children(node, open);
+        }
         if t.class_kinds.contains(&kind) {
             return self.lower_class_body(node, open);
         }
@@ -1110,6 +1203,17 @@ impl<'t> FnCtx<'t> {
         node: Node<'t>,
     ) -> (Option<Node<'t>>, Option<Node<'t>>) {
         let t = self.table;
+        if t.binding_kinds2.contains(&node.kind()) {
+            // Go alone needs a second pattern/value field pair on the same
+            // table - see `GrammarTable::binding_kinds2`'s docs.
+            let pattern = (!t.binding_pattern_field2.is_empty())
+                .then(|| node.child_by_field_name(t.binding_pattern_field2))
+                .flatten();
+            let value = (!t.binding_value_field2.is_empty())
+                .then(|| node.child_by_field_name(t.binding_value_field2))
+                .flatten();
+            return (pattern, value);
+        }
         if !t.binding_pattern_field.is_empty() || !t.binding_value_field.is_empty() {
             let pattern = (!t.binding_pattern_field.is_empty())
                 .then(|| node.child_by_field_name(t.binding_pattern_field))
@@ -1221,7 +1325,7 @@ impl<'t> FnCtx<'t> {
         if let Some(r) = right {
             self.scan_uses(r, &mut uses);
         }
-        let is_member = self.table.member_access_kinds.contains(&left.kind());
+        let is_member = is_member_target(self.table, left);
         let (kind, defs) = if is_member {
             // A write through a member/attribute access outlives the
             // function: the base object is a use, never a def.
@@ -1411,6 +1515,13 @@ impl<'t> FnCtx<'t> {
     /// iteration is loop-carried by construction and the back edge is real.
     fn lower_for(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
         let t = self.table;
+        if !t.for_clause_kind.is_empty() {
+            // Go: `for_statement` covers four shapes under one grammar kind
+            // - see `lower_go_for` and the field docs on `for_range_kind`/
+            // `for_clause_kind`. Every other table leaves `for_clause_kind`
+            // empty, so this never fires for them.
+            return self.lower_go_for(node, open);
+        }
         let (Some(pattern), Some(value), Some(body)) = (
             field_or_nth(node, t.for_pattern_field, 0),
             field_or_nth(node, t.for_value_field, 1),
@@ -1463,6 +1574,129 @@ impl<'t> FnCtx<'t> {
         self.link(&body_exits, branch);
         let ctx = self.loops.pop().expect("for loop context pushed above");
         if self.table.block_scoped {
+            self.pop_scope();
+        }
+        let mut exits = vec![branch];
+        exits.extend(ctx.breaks);
+        exits
+    }
+
+    /// Go's `for_statement` sub-dispatch: probes which of the four shapes
+    /// sharing this one grammar kind is actually present - see the field
+    /// docs on `GrammarTable::for_range_kind`/`for_clause_kind` - and routes
+    /// to whichever ordinary treatment fits, so every shape still gets the
+    /// identical loop-with-back-edge modeling a dedicated node kind would
+    /// get elsewhere. Only ever reached through `lower_for`'s own gate,
+    /// itself only taken when `for_clause_kind` is non-empty, i.e. only for
+    /// Go.
+    fn lower_go_for(&mut self, node: Node<'t>, open: Vec<usize>) -> Vec<usize> {
+        let t = self.table;
+        if first_child_of_kind(node, t.for_clause_kind).is_some() {
+            // Three-clause C-style `for i := 0; i < n; i++ {}` -
+            // deliberately unmodeled, the same v1 gap as Java's plain
+            // `for_statement` (see module docs). Names the initializer
+            // declares are pre-declared in a throwaway scope first, exactly
+            // like the generic-construct fallback in `lower_stmt` already
+            // does for every other unrecognized construct - otherwise a
+            // loop-scoped `i` read inside the (also unmodeled) body would
+            // resolve straight through to whatever it shadows.
+            if t.block_scoped {
+                self.push_scope();
+                let mut names = Vec::new();
+                self.collect_nested_binding_names(node, &mut names);
+                for name in names {
+                    self.declare(name);
+                }
+            }
+            let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
+            if t.block_scoped {
+                self.pop_scope();
+            }
+            self.link(&open, entry);
+            return vec![exit];
+        }
+        if let Some(range) = first_child_of_kind(node, t.for_range_kind) {
+            return self.lower_go_range_for(node, range, open);
+        }
+        // No clause at all: either a bare boolean condition (`for cond {}`,
+        // `lower_while`'s exact shape - two named children, condition then
+        // body) or none at all (`for {}`, `lower_loop`'s exact shape - just
+        // the body). Both are already fielded on `node` itself exactly the
+        // way those two functions expect, so this delegates straight to
+        // them rather than re-implementing either.
+        let mut cursor = node.walk();
+        if node.named_children(&mut cursor).count() <= 1 {
+            self.lower_loop(node, open)
+        } else {
+            self.lower_while(node, open)
+        }
+    }
+
+    /// The for-each shape of Go's polymorphic `for_statement`: pattern and
+    /// value live on the nested `range_clause` (`range`, not `node`) -
+    /// `for_pattern_field`/`for_value_field` are resolved against it
+    /// directly rather than through `field_or_nth`'s positional fallback,
+    /// since Go always fields them when present. The loop body stays on
+    /// `node` itself. Otherwise identical to the ordinary `for_kinds`
+    /// treatment every other table gets straight from `lower_for`.
+    fn lower_go_range_for(
+        &mut self,
+        node: Node<'t>,
+        range: Node<'t>,
+        open: Vec<usize>,
+    ) -> Vec<usize> {
+        let t = self.table;
+        let Some(body) = field_or_kind(node, t.for_body_field, "") else {
+            let (entry, exit) = self.unit(node, NodeKind::Pure, vec![]);
+            self.link(&open, entry);
+            return vec![exit];
+        };
+        let pattern = (!t.for_pattern_field.is_empty())
+            .then(|| range.child_by_field_name(t.for_pattern_field))
+            .flatten();
+        let value = (!t.for_value_field.is_empty())
+            .then(|| range.child_by_field_name(t.for_value_field))
+            .flatten();
+        let calls = value.map_or_else(Vec::new, |v| self.extract_calls(v));
+        let mut uses = Vec::new();
+        if let Some(v) = value {
+            self.scan_uses(v, &mut uses);
+        }
+        if t.block_scoped {
+            self.push_scope();
+        }
+        let mut defs = Vec::new();
+        if let Some(p) = pattern {
+            self.scan_defs(p, true, &mut defs);
+        }
+        let line = line_of(node);
+        let label = snippet(node, self.source);
+        let branch = self.push(IrNode {
+            line: Some(line),
+            kind: NodeKind::Branch,
+            defs,
+            uses,
+            succs: Vec::new(),
+            label,
+        });
+        let entry = if let (Some(&first), Some(&last)) = (calls.first(), calls.last()) {
+            self.link(&[last], branch);
+            first
+        } else {
+            branch
+        };
+        self.link(&open, entry);
+        self.loops.push(LoopCtx {
+            continue_target: branch,
+            breaks: Vec::new(),
+        });
+        let body_exits = self.lower_stmt(body, vec![branch]);
+        self.link(&body_exits, branch);
+        let ctx = self
+            .loops
+            .pop()
+            .expect("go range-for loop context pushed above");
+        if t.block_scoped {
             self.pop_scope();
         }
         let mut exits = vec![branch];

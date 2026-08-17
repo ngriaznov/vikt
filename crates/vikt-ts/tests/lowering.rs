@@ -1061,6 +1061,8 @@ fn generator_string_identifies_the_grammar() {
     assert_eq!(module.generator, "vikt-ts/tree-sitter-java");
     let module = lower_source(Language::Kotlin, "fun f() {}", "f.kt").expect("lowers");
     assert_eq!(module.generator, "vikt-ts/tree-sitter-kotlin");
+    let module = lower_source(Language::Go, "func f() {}", "f.go").expect("lowers");
+    assert_eq!(module.generator, "vikt-ts/tree-sitter-go");
 }
 
 // ---------------------------------------------------------------- Java ----
@@ -1839,6 +1841,381 @@ fn kotlin_lowering_is_deterministic() {
             assert_eq!(na.defs, nb.defs);
             assert_eq!(na.uses, nb.uses);
             assert_eq!(na.succs, nb.succs);
+        }
+    }
+}
+
+// ------------------------------------------------------------------ Go ----
+
+const GO_SHADOWING: &str = r"
+func shadow() int {
+	x := 1
+	{
+		x := x + 1
+		useX(x)
+	}
+	return x
+}
+";
+
+#[test]
+fn go_short_var_decl_shadows_with_a_fresh_var_in_a_nested_block() {
+    let module = lower_source(Language::Go, GO_SHADOWING, "shadow.go").expect("lowers");
+    let f = function(&module, "shadow");
+    f.validate().expect("valid graph");
+
+    let outer_def = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("x := 1"))
+        .and_then(|n| n.defs.first().copied())
+        .expect("outer x := 1");
+    let inner_def = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("x := x + 1"))
+        .and_then(|n| n.defs.first().copied())
+        .expect("inner x := x + 1");
+    assert_ne!(
+        outer_def, inner_def,
+        "a nested block's `:=` must shadow with a fresh VarId, not reuse the outer one - Go is \
+         block-scoped like Rust/Java/Kotlin, not flat like Python"
+    );
+
+    let inner_rhs_uses = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("x := x + 1"))
+        .map(|n| n.uses.clone())
+        .expect("inner x := x + 1 node");
+    assert!(
+        inner_rhs_uses.contains(&outer_def),
+        "the inner `:=`'s RHS reads the outer x, evaluated before the new binding exists"
+    );
+
+    let tail_uses = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .map(|n| n.uses.clone())
+        .expect("the return node");
+    assert!(
+        tail_uses.contains(&outer_def) && !tail_uses.contains(&inner_def),
+        "the function's `return x` refers to the outer binding, popped back into scope once the \
+         nested block ends, not the shadowed inner one"
+    );
+}
+
+const GO_METHOD_RECEIVER: &str = r"
+type Counter struct {
+	total int
+}
+
+func (c *Counter) Add(delta int) int {
+	c.total = c.total + delta
+	return c.total
+}
+
+func (c Counter) Get() int {
+	return c.total
+}
+";
+
+#[test]
+fn go_methods_are_named_type_colon_colon_method_from_their_own_receiver_field() {
+    // Go has no class body to nest a method inside - the owner comes from
+    // the method's own `receiver` field instead (`walk::receiver_owner`),
+    // pointer and value receivers naming the identical owner.
+    let module = lower_source(Language::Go, GO_METHOD_RECEIVER, "counter.go").expect("lowers");
+    let names: Vec<&str> = module
+        .functions
+        .iter()
+        .map(|f| f.id.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"Counter::Add"),
+        "pointer receiver `(c *Counter)` must still name the owner `Counter`: {names:?}"
+    );
+    assert!(
+        names.contains(&"Counter::Get"),
+        "value receiver `(c Counter)` must name the owner `Counter`: {names:?}"
+    );
+
+    let add = function(&module, "Counter::Add");
+    add.validate().expect("valid graph");
+    let write = add
+        .nodes
+        .iter()
+        .find(|n| matches!(&n.kind, NodeKind::StateWrite { .. }))
+        .expect("a StateWrite node for the field assignment through the receiver");
+    let NodeKind::StateWrite { target } = &write.kind else {
+        unreachable!()
+    };
+    assert_eq!(target, "c.total");
+}
+
+const GO_LOOP: &str = r"
+func sumPositive(xs []int) int {
+	total := 0
+	for _, x := range xs {
+		if x < 0 {
+			continue
+		}
+		total += x
+	}
+	return total
+}
+";
+
+#[test]
+fn go_range_for_has_loop_carried_defs_and_a_back_edge() {
+    let module = lower_source(Language::Go, GO_LOOP, "sum.go").expect("lowers");
+    let f = function(&module, "sumPositive");
+    f.validate().expect("valid graph");
+
+    let (branch_id, branch) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("for _, x"))
+        .expect("the range-for's iterator-advance Branch node");
+    assert!(
+        !branch.defs.is_empty(),
+        "the range variable `x` must be a def on the Branch node"
+    );
+
+    let body = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("total += x"))
+        .expect("loop body statement");
+    assert!(
+        body.succs.contains(&branch_id),
+        "the loop body must edge back to the range-for's Branch node"
+    );
+
+    let cont = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("continue"))
+        .expect("the continue node");
+    assert!(
+        cont.succs.contains(&branch_id),
+        "continue must edge to the loop's Branch node, not fall through to total += x"
+    );
+}
+
+const GO_INFINITE_LOOP: &str = r"
+func findFirst(limit int) int {
+	i := 0
+	for {
+		if i >= limit {
+			return -1
+		}
+		i++
+		if scan(i) {
+			return i
+		}
+	}
+}
+";
+
+#[test]
+fn go_bare_for_with_no_clause_models_an_unconditional_loop() {
+    // `for { .. }` shares its grammar kind with the range-for and
+    // three-clause for above - only one named child (the body), no
+    // condition at all - `lower_go_for` must route it to the same
+    // `lower_loop` treatment Rust's bare `loop { .. }` gets.
+    let module = lower_source(Language::Go, GO_INFINITE_LOOP, "find.go").expect("lowers");
+    let f = function(&module, "findFirst");
+    f.validate().expect("valid graph");
+
+    let returns: Vec<_> = f
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::Return))
+        .collect();
+    assert_eq!(
+        returns.len(),
+        2,
+        "both `return`s inside `for {{ .. }}` must be modeled as Return nodes: {:?}",
+        kinds(f)
+    );
+    assert!(returns.iter().all(|n| n.succs.is_empty()));
+
+    let (branch_id, _) = f
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, n)| matches!(n.kind, NodeKind::Branch) && n.label.starts_with("for {"))
+        .expect("the loop's head Branch node");
+    // `i++` is not the last statement in the body (a second `if` follows
+    // it), so its own successor is that `if`'s condition, not the head
+    // directly - the real back edge comes off the second `if`'s false
+    // branch instead. Assert the back edge exists at all, from wherever it
+    // actually originates, rather than pinning a specific node to it.
+    assert!(
+        f.nodes
+            .iter()
+            .enumerate()
+            .any(|(i, n)| i != branch_id && n.succs.contains(&branch_id)),
+        "some node inside the loop body must edge back to the head node: {:?}",
+        kinds(f)
+    );
+}
+
+const GO_DEFER_AND_GOROUTINE: &str = r"
+func dispatch(total int) {
+	defer cleanup()
+	go worker(total)
+	if total < 0 {
+		panic(total)
+	}
+}
+";
+
+#[test]
+fn go_defer_and_go_statements_still_extract_their_inner_call() {
+    // Neither `defer_statement` nor `go_statement` is itself a `call_kinds`
+    // node - both wrap exactly one call - so they fall through to the
+    // generic construct fallback, which still extracts the wrapped call as
+    // an ordinary `Call` node ahead of the statement's own opaque unit (see
+    // the `GO` table's doc comment on the deliberately absent concurrency
+    // modeling for `go`). `panic` is likewise an ordinary call - Go has no
+    // exception node kind at all.
+    let module = lower_source(Language::Go, GO_DEFER_AND_GOROUTINE, "dispatch.go").expect("lowers");
+    let f = function(&module, "dispatch");
+    f.validate().expect("valid graph");
+
+    let names = callees(f);
+    assert!(
+        names.contains(&"cleanup"),
+        "the deferred call must still be extracted as its own Call node: {names:?}"
+    );
+    assert!(
+        names.contains(&"worker"),
+        "the launched goroutine's call must still be extracted as its own Call node: {names:?}"
+    );
+    assert!(
+        names.contains(&"panic"),
+        "panic is an ordinary call, not a dedicated throw-like construct: {names:?}"
+    );
+
+    // The extracted call precedes the statement's own opaque unit - i.e. it
+    // is reachable on the way to it, not orphaned off to one side.
+    let cleanup_call = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "cleanup"))
+        .expect("cleanup call node");
+    let defer_stmt = f
+        .nodes
+        .iter()
+        .position(|n| n.label.starts_with("defer cleanup"))
+        .expect("the defer statement's own opaque unit");
+    assert!(
+        f.nodes[cleanup_call].succs.contains(&defer_stmt),
+        "the extracted call must lead into the defer statement's own unit"
+    );
+
+    let worker_call = f
+        .nodes
+        .iter()
+        .position(|n| matches!(&n.kind, NodeKind::Call { callee, .. } if callee == "worker"))
+        .expect("worker call node");
+    let go_stmt = f
+        .nodes
+        .iter()
+        .position(|n| n.label.starts_with("go worker"))
+        .expect("the go statement's own opaque unit");
+    assert!(
+        f.nodes[worker_call].succs.contains(&go_stmt),
+        "the extracted call must lead into the go statement's own unit"
+    );
+}
+
+const GO_VAR_CONST: &str = r"
+func multiSpec() int {
+	var total int = 10
+	const (
+		zero = 0
+		one  = 1
+	)
+	return total + one
+}
+";
+
+#[test]
+fn go_var_and_const_blocks_splice_one_node_per_spec_in_the_caller_scope() {
+    // `var_declaration`/`const_declaration` are `flatten_kinds`, not
+    // `binding_kinds` themselves: each `var_spec`/`const_spec` becomes its
+    // own statement in the *same* scope as its neighbours - no transient
+    // block scope that would pop the declared names back out of view.
+    let module = lower_source(Language::Go, GO_VAR_CONST, "multi.go").expect("lowers");
+    let f = function(&module, "multiSpec");
+    f.validate().expect("valid graph");
+
+    let total_decl = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("total int = 10"))
+        .expect("var total int = 10");
+    let one_decl = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "one  = 1")
+        .expect("const one = 1, its own node distinct from zero = 0");
+
+    let tail = f
+        .nodes
+        .iter()
+        .find(|n| matches!(n.kind, NodeKind::Return))
+        .expect("return total + one");
+    assert!(
+        tail.uses.contains(&total_decl.defs[0]) && tail.uses.contains(&one_decl.defs[0]),
+        "both `total` (var) and `one` (const, from inside the parenthesized block) must still \
+         resolve to their declarations, not vanish with a popped scope: {:?}",
+        tail.uses
+    );
+}
+
+const GO_CALLS: &str = r"
+func compute(x int) int {
+	doubled := scale(x)
+	obj := &Builder{}
+	return obj.Build(doubled)
+}
+";
+
+#[test]
+fn go_extracts_free_and_selector_call_targets() {
+    let module = lower_source(Language::Go, GO_CALLS, "compute.go").expect("lowers");
+    let f = function(&module, "compute");
+    f.validate().expect("valid graph");
+
+    let names = callees(f);
+    assert!(names.contains(&"scale"), "free call target: {names:?}");
+    assert!(
+        names.contains(&"obj.Build"),
+        "selector call target with receiver: {names:?}"
+    );
+}
+
+#[test]
+fn go_lowering_is_deterministic() {
+    let a = lower_source(Language::Go, GO_LOOP, "sum.go").expect("lowers");
+    let b = lower_source(Language::Go, GO_LOOP, "sum.go").expect("lowers");
+    assert_eq!(
+        kinds(function(&a, "sumPositive")),
+        kinds(function(&b, "sumPositive"))
+    );
+    for (fa, fb) in a.functions.iter().zip(b.functions.iter()) {
+        assert_eq!(fa.nodes.len(), fb.nodes.len());
+        for (na, nb) in fa.nodes.iter().zip(fb.nodes.iter()) {
+            assert_eq!(na.defs, nb.defs);
+            assert_eq!(na.uses, nb.uses);
+            assert_eq!(na.succs, nb.succs);
+            assert_eq!(na.label, nb.label);
         }
     }
 }

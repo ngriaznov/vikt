@@ -57,9 +57,15 @@ const MAX_COPY_BYTES: u64 = 8 * 1024 * 1024;
 /// Extensions calibrate cannot mutate — analyzable inputs without a
 /// mutation engine — for an honest "not supported" error instead of a
 /// puzzling "no sources found". Derived from the registry's tables so the
-/// two can never disagree about what exists.
+/// two can never disagree about what exists. Go is analyzable (`vikt-ts`)
+/// but not calibratable, same reasoning as `.class`/`.java`/`.kt`: no
+/// mutation engine exists for it, and building a one-off textual splicer
+/// just for Go rather than the general-purpose engine a future stage adds
+/// would be its own maintenance burden.
 fn uncalibratable(ext: &str) -> bool {
-    language::ext::CLASS.contains(&ext) || language::ext::JVM_SOURCE.contains(&ext)
+    language::ext::CLASS.contains(&ext)
+        || language::ext::JVM_SOURCE.contains(&ext)
+        || language::ext::GO.contains(&ext)
 }
 
 /// How wide a lens the panel score and positional null use when paired

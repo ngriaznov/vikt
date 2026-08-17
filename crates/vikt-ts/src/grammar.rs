@@ -52,14 +52,51 @@ pub(crate) struct GrammarTable {
     /// `class_declaration` doesn't field its `class_body` child).
     pub class_body_kind: &'static str,
 
+    /// A function-like node's own receiver-parameter field, naming its
+    /// owning type inline rather than through a `class_kinds` ancestor - Go
+    /// alone has this: `method_declaration.receiver`, a one-parameter
+    /// `parameter_list` (methods live as top-level siblings, not nested
+    /// inside any type body). Combined with `receiver_type_field`/
+    /// `receiver_pointer_kind` in `walk::receiver_owner` to still produce
+    /// `Type::method` naming - see that function's docs. Empty for every
+    /// language reached instead through `class_kinds` (Java, Kotlin) or
+    /// with no method-receiver concept at all (Rust, Python).
+    pub receiver_field: &'static str,
+    /// The receiver parameter's own type field (Go: `type`, on the
+    /// `parameter_declaration` inside `receiver_field`). Unused when
+    /// `receiver_field` is empty.
+    pub receiver_type_field: &'static str,
+    /// A pointer-wrapper kind around the receiver's type (Go: `pointer_type`
+    /// wraps a `*T` receiver's `type_identifier`) - unwrapped one level so
+    /// `(c *Counter)` and `(c Counter)` both name the same owner `Counter`.
+    /// Unused when `receiver_field` is empty.
+    pub receiver_pointer_kind: &'static str,
+
     /// A node whose named children are a sequence of statements.
     pub block_kinds: &'static [&'static str],
     /// Nodes that carry no meaning of their own and transparently unwrap to
     /// their `body` field, or their last named child when there is no such
     /// field (e.g. Rust's `expression_statement`, which wraps exactly the
     /// expression it terminates; Kotlin's `function_body`, which wraps
-    /// either a `block` or a tail expression for `= expr` bodies).
+    /// either a `block` or a tail expression for `= expr` bodies; Go's
+    /// `block`, which wraps a `statement_list` holding the real statements,
+    /// or nothing at all when empty - `statement_list` itself is also a
+    /// `block_kinds` entry for Go, so an empty `block` (no `statement_list`
+    /// child to unwrap to) still dispatches correctly as an empty sequence
+    /// rather than falling through to an expression-body reading).
     pub wrapper_kinds: &'static [&'static str],
+    /// A node whose named children are spliced directly into the
+    /// surrounding statement sequence in place of the node itself, in the
+    /// *caller's* scope rather than a fresh one - Go's `var_declaration`/
+    /// `const_declaration`, each of whose named children is one `var_spec`/
+    /// `const_spec` (the parenthesized block form holds more than one; the
+    /// bare form holds exactly one). Unlike `wrapper_kinds`, which unwraps
+    /// to a single inner node, every named child here becomes its own
+    /// dispatchable statement - and unlike `block_kinds`, no new scope is
+    /// pushed, since a `var`/`const` block's declared names must stay
+    /// visible to the statements after it, not vanish when a transient
+    /// block scope pops. Empty for every other language.
+    pub flatten_kinds: &'static [&'static str],
 
     /// A fresh-binding declaration form, e.g. Rust's `let`, Java's
     /// `local_variable_declaration`/`field_declaration`, Kotlin's
@@ -88,6 +125,23 @@ pub(crate) struct GrammarTable {
     pub binding_declarator_field: &'static str,
     pub binding_declarator_name_field: &'static str,
     pub binding_declarator_value_field: &'static str,
+    /// A second fresh-binding shape needing its own pattern/value field
+    /// names, distinct from `binding_pattern_field`/`binding_value_field` -
+    /// Go alone needs two at once: `short_var_declaration`/
+    /// `receive_statement`'s `left`/`right` (a whole pattern-list field,
+    /// exactly the Rust/Python shape) vs. `var_spec`/`const_spec`'s `name`/
+    /// `value` (a bare identifier field, only the *first* name captured
+    /// when a spec declares more than one - `var a, b = 1, 2` binds `a`
+    /// only; `b` resolves as an ambient read at its first use, a documented
+    /// v1 gap since the grammar repeats the `name` field rather than
+    /// wrapping every name in one list node the way `left`/`right` do).
+    /// Every `binding_kinds` member listed here resolves through
+    /// `binding_pattern_field2`/`binding_value_field2` instead of the
+    /// primary pair; every other member keeps using the primary pair
+    /// unaffected. Empty for every language but Go.
+    pub binding_kinds2: &'static [&'static str],
+    pub binding_pattern_field2: &'static str,
+    pub binding_value_field2: &'static str,
 
     pub assign_kinds: &'static [&'static str],
     /// A dedicated compound-assignment node kind, e.g. Rust's
@@ -166,6 +220,25 @@ pub(crate) struct GrammarTable {
     pub for_pattern_field: &'static str,
     pub for_value_field: &'static str,
     pub for_body_field: &'static str,
+    /// Go's `for_statement` is one grammar kind covering four shapes: no
+    /// clause at all (an unconditional loop, `loop_kinds`' shape), a bare
+    /// boolean expression (`while_kinds`' shape), a `for_clause` (three-part
+    /// C-style, deliberately unmodeled - the same v1 gap as Java's plain
+    /// `for_statement`, falling through to the generic construct fallback),
+    /// or a `range_clause` (for-each, this field's own shape - `left`/
+    /// `right` on the clause itself, not on `for_statement`, are what
+    /// `for_pattern_field`/`for_value_field` above resolve against for Go).
+    /// Non-empty here switches `lower_for` onto `FnCtx::lower_go_for`, a
+    /// shape probe that dispatches to whichever of the other three
+    /// treatments actually fits, so all three still get the identical
+    /// loop-with-back-edge modeling their own dedicated node kinds get
+    /// elsewhere. Empty (every other table) keeps the ordinary single-shape
+    /// `for_kinds` path unaffected.
+    pub for_range_kind: &'static str,
+    /// The C-style clause's own kind, checked only by the same probe -
+    /// tried first, so its presence is never mistaken for a bare condition.
+    /// Empty everywhere else.
+    pub for_clause_kind: &'static str,
 
     pub return_kinds: &'static [&'static str],
     pub throw_kinds: &'static [&'static str],
@@ -309,9 +382,13 @@ pub(crate) static RUST: GrammarTable = GrammarTable {
     class_name_field: "",
     class_body_field: "",
     class_body_kind: "",
+    receiver_field: "",
+    receiver_type_field: "",
+    receiver_pointer_kind: "",
 
     block_kinds: &["block"],
     wrapper_kinds: &["expression_statement", "unsafe_block", "else_clause"],
+    flatten_kinds: &[],
 
     binding_kinds: &["let_declaration"],
     binding_pattern_field: "pattern",
@@ -321,6 +398,9 @@ pub(crate) static RUST: GrammarTable = GrammarTable {
     binding_declarator_field: "",
     binding_declarator_name_field: "",
     binding_declarator_value_field: "",
+    binding_kinds2: &[],
+    binding_pattern_field2: "",
+    binding_value_field2: "",
 
     assign_kinds: &["assignment_expression"],
     compound_assign_kinds: &["compound_assignment_expr"],
@@ -355,6 +435,8 @@ pub(crate) static RUST: GrammarTable = GrammarTable {
     for_pattern_field: "pattern",
     for_value_field: "value",
     for_body_field: "body",
+    for_range_kind: "",
+    for_clause_kind: "",
 
     return_kinds: &["return_expression"],
     throw_kinds: &[],
@@ -421,9 +503,13 @@ pub(crate) static PYTHON: GrammarTable = GrammarTable {
     class_name_field: "",
     class_body_field: "",
     class_body_kind: "",
+    receiver_field: "",
+    receiver_type_field: "",
+    receiver_pointer_kind: "",
 
     block_kinds: &["block"],
     wrapper_kinds: &["expression_statement", "else_clause"],
+    flatten_kinds: &[],
 
     binding_kinds: &[],
     binding_pattern_field: "",
@@ -433,6 +519,9 @@ pub(crate) static PYTHON: GrammarTable = GrammarTable {
     binding_declarator_field: "",
     binding_declarator_name_field: "",
     binding_declarator_value_field: "",
+    binding_kinds2: &[],
+    binding_pattern_field2: "",
+    binding_value_field2: "",
 
     assign_kinds: &["assignment"],
     compound_assign_kinds: &["augmented_assignment"],
@@ -467,6 +556,8 @@ pub(crate) static PYTHON: GrammarTable = GrammarTable {
     for_pattern_field: "left",
     for_value_field: "right",
     for_body_field: "body",
+    for_range_kind: "",
+    for_clause_kind: "",
 
     return_kinds: &["return_statement"],
     throw_kinds: &["raise_statement"],
@@ -537,9 +628,13 @@ pub(crate) static JAVA: GrammarTable = GrammarTable {
     class_name_field: "name",
     class_body_field: "body",
     class_body_kind: "",
+    receiver_field: "",
+    receiver_type_field: "",
+    receiver_pointer_kind: "",
 
     block_kinds: &["block"],
     wrapper_kinds: &["expression_statement"],
+    flatten_kinds: &[],
 
     binding_kinds: &["local_variable_declaration", "field_declaration"],
     binding_pattern_field: "",
@@ -549,6 +644,9 @@ pub(crate) static JAVA: GrammarTable = GrammarTable {
     binding_declarator_field: "declarator",
     binding_declarator_name_field: "name",
     binding_declarator_value_field: "value",
+    binding_kinds2: &[],
+    binding_pattern_field2: "",
+    binding_value_field2: "",
 
     assign_kinds: &["assignment_expression"],
     compound_assign_kinds: &[],
@@ -589,6 +687,8 @@ pub(crate) static JAVA: GrammarTable = GrammarTable {
     for_pattern_field: "name",
     for_value_field: "value",
     for_body_field: "body",
+    for_range_kind: "",
+    for_clause_kind: "",
 
     return_kinds: &["return_statement"],
     throw_kinds: &["throw_statement"],
@@ -660,12 +760,16 @@ pub(crate) static KOTLIN: GrammarTable = GrammarTable {
     class_name_field: "name",
     class_body_field: "",
     class_body_kind: "class_body",
+    receiver_field: "",
+    receiver_type_field: "",
+    receiver_pointer_kind: "",
 
     block_kinds: &["block"],
     // `function_body` wraps either a `block` or a tail expression (`fun f()
     // = expr`); unwrapping it here lets `lower_module` decide which by
     // inspecting what comes out, exactly like `vikt-js`'s arrow expr-body.
     wrapper_kinds: &["function_body"],
+    flatten_kinds: &[],
 
     binding_kinds: &["property_declaration"],
     binding_pattern_field: "",
@@ -675,6 +779,9 @@ pub(crate) static KOTLIN: GrammarTable = GrammarTable {
     binding_declarator_field: "",
     binding_declarator_name_field: "",
     binding_declarator_value_field: "",
+    binding_kinds2: &[],
+    binding_pattern_field2: "",
+    binding_value_field2: "",
 
     assign_kinds: &["assignment"],
     compound_assign_kinds: &[],
@@ -709,6 +816,8 @@ pub(crate) static KOTLIN: GrammarTable = GrammarTable {
     for_pattern_field: "",
     for_value_field: "",
     for_body_field: "",
+    for_range_kind: "",
+    for_clause_kind: "",
 
     return_kinds: &["return_expression"],
     throw_kinds: &["throw_expression"],
@@ -771,4 +880,213 @@ pub(crate) static KOTLIN: GrammarTable = GrammarTable {
     // except `lambda_parameters` is the body, run in sequence.
     closure_body_is_bare_children: true,
     closure_name_format: "{owner}::{lambda#{idx}}",
+};
+
+/// Verified against real parse dumps from `tree-sitter-go` 0.25.0 (probed
+/// directly, not guessed from the grammar source).
+///
+/// A `block`'s statements sit one level down, inside an unfielded
+/// `statement_list` child (absent entirely when the block is empty) -
+/// `block` is both a `wrapper_kinds` entry (unwraps to that child) and a
+/// `block_kinds` entry in its own right (so an empty block, which has
+/// nothing to unwrap to, still dispatches as an empty statement sequence
+/// rather than falling through to `lower_module`'s expression-body
+/// reading). See the field docs on `wrapper_kinds`/`block_kinds`.
+///
+/// Methods (`method_declaration`) are `function_kinds` alongside plain
+/// `function_declaration`s - both field `name`/`parameters`/`body`
+/// identically - but live as top-level siblings, not nested inside any
+/// type body: `Type::method` naming instead comes from the function node's
+/// own `receiver` field (`walk::receiver_owner`), never from an ancestor
+/// search, so `class_kinds` stays empty here.
+///
+/// `var`/`const` declarations are two-level: `var_declaration`/
+/// `const_declaration` (`flatten_kinds`, spliced into the surrounding
+/// sequence - the parenthesized block form holds more than one
+/// `var_spec`/`const_spec`, the bare form exactly one) each holding one or
+/// more `var_spec`/`const_spec` (`binding_kinds`, `name`/`value` fielded
+/// directly - `binding_kinds2`, since `short_var_declaration`'s `:=` and a
+/// `select` arm's `receive_statement` need the *other* pair, `left`/
+/// `right`, on the very same table). `const`'s implicit `iota`-repeat specs
+/// (`One`/`Two` after `Zero = iota`) simply carry no `value` field at all -
+/// handled by the same `None` path every binding already takes for a
+/// value-less declaration.
+///
+/// `for_statement` is one grammar kind covering four loop shapes - see the
+/// field docs on `for_range_kind`/`for_clause_kind` and `walk::lower_go_for`.
+///
+/// `expression_switch_statement` and `select_statement` share the ordinary
+/// `match_kinds` treatment: a switch's `value` field is the discriminant
+/// (absent entirely for a tagless `switch { case cond: .. }`, which
+/// `match_subject_field`'s existing empty-is-fine handling already covers);
+/// a select has no discriminant at all, so `match_subject_field` simply
+/// never resolves for it either, same empty-is-fine path. `expression_case`
+/// carries its label(s) in one `value` field (an `expression_list` wrapping
+/// however many - `case 1, 2:` is one node, `match_arm_pattern_multi:
+/// false`, mirroring Rust's `1 | 2`); `communication_case` has no `value`
+/// field at all, so `match_arm_pattern_field` never finds anything on it -
+/// every arm reads as a wildcard (`is_default`), and its own `communication`
+/// child (the send/receive statement, unfielded to `match_arm_pattern_field`
+/// so it is never excluded as a "label") is simply lowered as the arm's own
+/// leading body statement instead. A `v := <-ch` receive is
+/// `receive_statement`, `left`/`right` fielded exactly like
+/// `short_var_declaration` - added to `binding_kinds` alongside it - so the
+/// captured value is a real def, not an ambient read; a bare `<-done` (no
+/// capture) has no `left` field, handled by the same value-only path a
+/// value-less `var` spec takes. Type switches (`switch v := x.(type)`) are
+/// a distinct grammar kind (`type_switch_statement`) from a value switch
+/// and are deliberately unmodeled, like Java's C-style `for` - the generic
+/// construct fallback still extracts every call inside, just without
+/// per-branch exclusivity.
+///
+/// `panic`/`recover` are ordinary function calls - Go has no
+/// exception-like node kind at all, so `throw_kinds` stays empty, same
+/// rationale as Rust's (`Result`, not exceptions). A `defer`/`go` statement
+/// is not itself a `call_kinds` node - it wraps exactly one call expression,
+/// so both fall through to the generic construct fallback, which still
+/// extracts that inner call as an ordinary `Call` node ahead of the
+/// `defer`/`go` statement's own opaque unit: the deferred or launched call
+/// is swept the same as any other, and denylisting still reaches it. This
+/// frontend models no concurrency semantics for `go` beyond that - the
+/// goroutine is not a separate flow, and nothing here reasons about when it
+/// runs relative to the rest of the function.
+///
+/// `i++`/`i--` (`inc_statement`/`dec_statement`) field neither an operator
+/// nor a left/right split - just a bare identifier and an anonymous `++`/
+/// `--` token - so they are not `assign_kinds` here and fall through to the
+/// generic construct fallback too: the identifier is recorded as a use, not
+/// also a def, a documented v1 gap matching the existing "coarser, never
+/// wrong" precedent elsewhere in this table.
+pub(crate) static GO: GrammarTable = GrammarTable {
+    generator: "vikt-ts/tree-sitter-go",
+    block_scoped: true,
+
+    function_kinds: &["function_declaration", "method_declaration"],
+    function_name_field: "name",
+    function_params_field: "parameters",
+    function_params_kind: "",
+    function_body_field: "body",
+    function_body_kind: "",
+
+    class_kinds: &[],
+    class_name_field: "",
+    class_body_field: "",
+    class_body_kind: "",
+    receiver_field: "receiver",
+    receiver_type_field: "type",
+    receiver_pointer_kind: "pointer_type",
+
+    block_kinds: &["block", "statement_list"],
+    wrapper_kinds: &["block", "expression_statement"],
+    flatten_kinds: &["var_declaration", "const_declaration"],
+
+    binding_kinds: &[
+        "short_var_declaration",
+        "receive_statement",
+        "var_spec",
+        "const_spec",
+    ],
+    binding_pattern_field: "left",
+    binding_pattern_kind: "",
+    binding_value_field: "right",
+    binding_alt_field: "",
+    binding_declarator_field: "",
+    binding_declarator_name_field: "",
+    binding_declarator_value_field: "",
+    binding_kinds2: &["var_spec", "const_spec"],
+    binding_pattern_field2: "name",
+    binding_value_field2: "value",
+
+    assign_kinds: &["assignment_statement"],
+    compound_assign_kinds: &[],
+    assign_operator_field: "operator",
+    assign_declares: false,
+    assign_left_field: "left",
+    assign_right_field: "right",
+
+    call_kinds: &["call_expression"],
+    call_callee_field: "function",
+    call_object_field: "",
+    call_name_field: "",
+
+    member_access_kinds: &["selector_expression"],
+    member_object_field: "operand",
+    member_property_field: "field",
+
+    if_kinds: &["if_statement"],
+    if_cond_field: "condition",
+    if_then_field: "consequence",
+    if_alt_field: "alternative",
+    elif_kind: None,
+
+    while_kinds: &[],
+    while_cond_field: "",
+    while_body_field: "body",
+
+    loop_kinds: &[],
+    loop_body_field: "body",
+
+    for_kinds: &["for_statement"],
+    for_pattern_field: "left",
+    for_value_field: "right",
+    for_body_field: "body",
+    for_range_kind: "range_clause",
+    for_clause_kind: "for_clause",
+
+    return_kinds: &["return_statement"],
+    throw_kinds: &[],
+    break_kinds: &["break_statement"],
+    continue_kinds: &["continue_statement"],
+    break_texts: &[],
+    continue_texts: &[],
+
+    identifier_kinds: &["identifier"],
+
+    match_kinds: &["expression_switch_statement", "select_statement"],
+    match_subject_field: "value",
+    match_subject_kind: "",
+    match_body_field: "",
+    match_body_kind: "",
+    match_arm_kinds: &["expression_case", "default_case", "communication_case"],
+    match_arm_pattern_field: "value",
+    match_arm_pattern_kind: "",
+    match_arm_pattern_multi: false,
+    // A `case` value is an ordinary expression, never a destructuring
+    // pattern.
+    match_arm_pattern_declares: false,
+    match_arm_guard_field: "",
+    match_pattern_guard_field: "",
+
+    // Go has no exception construct at all - see the module-level doc
+    // comment above.
+    try_kinds: &[],
+    try_body_field: "",
+    try_body_kind: "",
+    catch_kinds: &[],
+    catch_body_field: "",
+    catch_body_kind: "",
+    catch_param_kind: "",
+    catch_param_name_field: "",
+    catch_param_as_field: "",
+    catch_param_as_pattern_kind: "",
+    catch_param_alias_field: "",
+    try_else_kind: "",
+    try_else_body_field: "",
+    finally_kind: "",
+    finally_body_field: "",
+    finally_body_kind: "",
+
+    // `func_literal` (Go's closure form) is deliberately not modeled as its
+    // own `FunctionIr` in this v1 - not required by any construct this
+    // table needs to get right, and a lambda/func-literal's calls and
+    // identifiers still get swept into whatever statement contains it via
+    // the ordinary generic-construct fallback, same "coarser, never wrong"
+    // treatment as Java's unmodeled `object_creation_expression` body.
+    closure_kinds: &[],
+    closure_params_field: "",
+    closure_params_kind: "",
+    closure_body_field: "",
+    closure_body_kind: "",
+    closure_body_is_bare_children: false,
+    closure_name_format: "",
 };

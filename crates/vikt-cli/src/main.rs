@@ -1,5 +1,5 @@
 //! `vikt` — produce a per-line importance sidecar for a compiled class, or a
-//! Rust, Python, JS/TS, Java or Kotlin source file.
+//! Rust, Python, JS/TS, Java, Kotlin or Go source file.
 //!
 //! ```text
 //! vikt Foo.class                 # JSON sidecar on stdout
@@ -10,6 +10,7 @@
 //! vikt src/ --scope repo         # same blend, cross-file, over a whole folder or repo
 //! vikt foo.rs --lowering ast     # force the tree-sitter fallback
 //! vikt Foo.kt                    # Kotlin source - tree-sitter, always
+//! vikt foo.go                    # Go source - tree-sitter, always
 //! vikt calibrate src/ --test-cmd "python3 -m unittest"  # self-calibration
 //! vikt calibrate src/ --test-cmd "node --test"          # ...or JS/TS
 //! vikt calibrate pkg/ --test-cmd "cargo test"            # ...or a cargo package
@@ -100,8 +101,8 @@ enum Scope {
     about = "Deterministic per-line importance tiering over function bodies",
     long_about = "Classifies every statement in every function body as core, boundary, \
 plumbing or inert, and projects the result onto source lines.\n\n\
-Accepts a JVM .class file, a Rust file or cargo package, or a Python, JS/TS, Java \
-or Kotlin source file. No model runs: every tier is the output of a dominance, \
+Accepts a JVM .class file, a Rust file or cargo package, or a Python, JS/TS, Java, \
+Kotlin or Go source file. No model runs: every tier is the output of a dominance, \
 loop or reachability query, and every span carries the reason that produced it.",
     // The analyze surface stays flag-style; `calibrate` is the one verb-shaped
     // operation. These two settings are what let a positional input and a
@@ -114,8 +115,8 @@ struct Args {
     #[command(subcommand)]
     command: Option<Cmd>,
 
-    /// The `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java` or `.kt` file to
-    /// analyze; a Rust cargo package (a directory with `Cargo.toml`, or a
+    /// The `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java`, `.kt` or `.go` file
+    /// to analyze; a Rust cargo package (a directory with `Cargo.toml`, or a
     /// `Cargo.toml` path — its other-language sources, if any, are also
     /// lowered); or any other directory, walked for every registry-known
     /// source extension it contains, of any language, into one sidecar.
@@ -181,9 +182,9 @@ struct Args {
     /// tree-sitter engine (noted on stderr) otherwise; `primary` requires
     /// the primary and errors exactly as before if it's missing; `ast`
     /// forces the tree-sitter engine even where the primary would work.
-    /// `.class` and `.java`/`.kt` source each have only one lowering, so
-    /// this is a no-op for them; `.js`/`.ts` rejects `ast` explicitly (see
-    /// `lowering::lower_js`).
+    /// `.class` and `.java`/`.kt`/`.go` source each have only one lowering,
+    /// so this is a no-op for them; `.js`/`.ts` rejects `ast` explicitly
+    /// (see `lowering::lower_js`).
     #[arg(long, value_enum, default_value_t = Lowering::Auto)]
     lowering: Lowering,
 
@@ -421,9 +422,9 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 type SingleFileLowering =
     Result<(String, Vec<FnInput>, Option<String>), Box<dyn std::error::Error>>;
 
-/// Single-file dispatch: the `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java` or
-/// `.kt` input `main`'s doc comment advertises, one frontend chosen by
-/// extension. The `.class` path's SMAP note is threaded through rather than
+/// Single-file dispatch: the `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java`,
+/// `.kt` or `.go` input `main`'s doc comment advertises, one frontend chosen
+/// by extension. The `.class` path's SMAP note is threaded through rather than
 /// printed immediately, preserving the message order a single-file run has
 /// always had (after scoring finishes, before the artifact is printed).
 fn lower_single_file_input(input: &Path, args: &Args) -> SingleFileLowering {
@@ -457,7 +458,7 @@ fn lower_single_file_input(input: &Path, args: &Args) -> SingleFileLowering {
             let lowered = lowering::lower_js(input, args.lowering)?;
             (lowered.generator, lowered.functions, None, lowered.profile)
         }
-        language::InputKind::JvmSource => {
+        language::InputKind::JvmSource | language::InputKind::GoSource => {
             let lowered = lowering::lower_ts_source(input)?;
             (lowered.generator, lowered.functions, None, lowered.profile)
         }

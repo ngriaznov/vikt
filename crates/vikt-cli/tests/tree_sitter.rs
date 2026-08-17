@@ -1,5 +1,5 @@
 //! `--lowering <auto|primary|ast>` through the built binary: the tree-sitter
-//! fallback for Rust and Python, and the new source-level Java/Kotlin
+//! fallback for Rust and Python, and the new source-level Java/Kotlin/Go
 //! capability. Every test here is helper-free by design — none requires
 //! `vikt-rust-lower` to be built, and the Python cases that matter most
 //! (`ast`) do not require `python3` either, since forcing the fallback is
@@ -12,6 +12,7 @@ const RUST_DEMO: &str = "../../demo/rust/orders.rs";
 const PYTHON_DEMO: &str = "../../demo/python/orders.py";
 const KOTLIN_DEMO: &str = "../../demo/kotlin/Orders.kt";
 const JAVA_DEMO: &str = "../../demo/java/OrderProcessor.java";
+const GO_DEMO: &str = "../../demo/go/orders.go";
 const JS_FIXTURE: &str = "tests/fixtures/scope/hub.js";
 
 fn run(args: &[&str]) -> std::process::Output {
@@ -205,10 +206,92 @@ fn java_source_scores_with_jvm_style_method_names() {
     );
 }
 
-/// The unsupported-extension error text now mentions every extension this
-/// binary understands, including the two new source-level capabilities.
+/// `.go` source, new capability: the demo file's pointer-receiver method
+/// comes back named `Type::method`, matching the JVM frontend's naming
+/// shape - even though Go has no class body to nest it inside at all (see
+/// `receiver_owner` in `vikt-ts`).
 #[test]
-fn unsupported_extension_error_mentions_java_and_kotlin() {
+fn go_source_scores_with_receiver_style_method_names() {
+    let out = run(&[GO_DEMO, "--stats"]);
+    let sidecar = parse_sidecar(&out);
+    assert_eq!(sidecar["generator"], "vikt-ts/tree-sitter-go");
+    let names = function_names(&sidecar);
+    assert!(names.contains(&"Counter::Add"), "found: {names:?}");
+    assert!(names.contains(&"Process"), "found: {names:?}");
+    // `--lowering` is meaningless here - there is no primary at source
+    // level - so every value must resolve identically.
+    for mode in ["auto", "primary", "ast"] {
+        let out = run(&[GO_DEMO, "--lowering", mode]);
+        let sidecar = parse_sidecar(&out);
+        assert_eq!(sidecar["generator"], "vikt-ts/tree-sitter-go");
+    }
+}
+
+/// The designed `.go` fixture's control-case function (`Process`, the exact
+/// same program as every other language's demo): dead bookkeeping declared
+/// early scores lower than the effectful tail, and coverage isn't
+/// suspiciously empty - a walker bug that silently produced zero nodes
+/// would still exit 0 and pass the generator check above.
+#[test]
+fn go_demo_produces_sensible_tiers_dead_bookkeeping_early_effects_late() {
+    let out = run(&[GO_DEMO, "--stats"]);
+    let sidecar = parse_sidecar(&out);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("lines"),
+        "the --stats histogram must be printed:\n{stderr}"
+    );
+
+    let process = sidecar["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["name"] == "Process")
+        .expect("Process function in the sidecar");
+    let spans = process["spans"].as_array().expect("spans array");
+
+    let tiers: Vec<&str> = spans.iter().map(|s| s["tier"].as_str().unwrap()).collect();
+    assert!(
+        tiers.contains(&"core"),
+        "the loop/branch-carrying body must produce at least one core line: {tiers:?}"
+    );
+
+    // `unused := "this value goes nowhere"` (line 26 of the demo) is dead
+    // bookkeeping - its value never reaches an effect. `runningTotal =
+    // total` (line 42, a package-level state write) and `return total`
+    // (line 43) are the effectful tail. The dead line must never outrank
+    // either effect. A sidecar span carries no source text, only line
+    // numbers - the demo's own fixed layout is the oracle here.
+    let tier_rank = |t: &str| match t {
+        "inert" => 0,
+        "plumbing" => 1,
+        "boundary" => 2,
+        "core" => 3,
+        other => panic!("unknown tier {other:?}"),
+    };
+    let span_for_line = |line: u64| {
+        spans
+            .iter()
+            .find(|s| s["start"].as_u64().unwrap() <= line && line <= s["end"].as_u64().unwrap())
+            .unwrap_or_else(|| panic!("no span covers line {line}: {spans:?}"))
+    };
+    let dead = span_for_line(26);
+    let write = span_for_line(42);
+    let ret = span_for_line(43);
+    let dead_rank = tier_rank(dead["tier"].as_str().unwrap());
+    let write_rank = tier_rank(write["tier"].as_str().unwrap());
+    let ret_rank = tier_rank(ret["tier"].as_str().unwrap());
+    assert!(
+        dead_rank <= write_rank && dead_rank <= ret_rank,
+        "dead bookkeeping ({dead_rank}) must not outrank the state write ({write_rank}) or the \
+         return ({ret_rank})"
+    );
+}
+
+/// The unsupported-extension error text now mentions every extension this
+/// binary understands, including the three new source-level capabilities.
+#[test]
+fn unsupported_extension_error_mentions_java_kotlin_and_go() {
     let dir = std::env::temp_dir().join(format!(
         "vikt-tree-sitter-test-{}-{}",
         std::process::id(),
@@ -224,6 +307,7 @@ fn unsupported_extension_error_mentions_java_and_kotlin() {
     assert!(stderr.contains(".java"), "error text: {stderr}");
     assert!(stderr.contains(".kt"), "error text: {stderr}");
     assert!(stderr.contains(".rs"), "error text: {stderr}");
+    assert!(stderr.contains(".go"), "error text: {stderr}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -233,7 +317,7 @@ fn unsupported_extension_error_mentions_java_and_kotlin() {
 /// demo files, over every language this task added or touched.
 #[test]
 fn every_demo_lowers_without_diagnostics_reported_on_stderr() {
-    for demo in [RUST_DEMO, PYTHON_DEMO, KOTLIN_DEMO, JAVA_DEMO] {
+    for demo in [RUST_DEMO, PYTHON_DEMO, KOTLIN_DEMO, JAVA_DEMO, GO_DEMO] {
         let mode: &[&str] = if demo == RUST_DEMO || demo == PYTHON_DEMO {
             &["--lowering", "ast"]
         } else {
