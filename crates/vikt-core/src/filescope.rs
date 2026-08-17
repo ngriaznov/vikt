@@ -42,6 +42,25 @@
 //! lines span the narrowest range — mirroring the attribution rule
 //! `vikt-cli`'s calibration already uses for the same situation.
 //!
+//! # Repo scope
+//!
+//! [`repo_scores`] is the same apparatus one rung up, not a second
+//! implementation: every function below already treats `functions` as an
+//! opaque slice and never assumes its members share a file — `resolve_edges`
+//! matches callees by name across the whole slice regardless of which
+//! function came from where, and [`function_features`]/[`function_weights`]
+//! are already correct for a cross-file call graph. The one thing that
+//! *does* assume a single file is bare line numbers as a key: two different
+//! files can each have a line 10. [`repo_scores`] and [`line_owners_by_file`]
+//! key on `(file, line)` instead — the file coming from each function's own
+//! [`FunctionIr::id`]'s `file` — so the identical weighting and
+//! rank-normalisation can run once across every scored function in a repo or
+//! folder input, letting a call cross a file boundary and letting the
+//! re-rank see every file's lines at once. [`file_scores`] is recovered by
+//! calling this with one file's functions and dropping the (redundant) file
+//! component of the key, which is exactly what its callers already did
+//! before this module supported more than one file at a time.
+//!
 //! [`Call`]: crate::ir::NodeKind::Call
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -75,28 +94,73 @@ pub struct ScopedFunction<'a> {
 /// A line scored by more than one function is attributed to the innermost —
 /// the function with the narrowest span of scored lines, ties broken by
 /// earlier position in `functions`.
+///
+/// Assumes every function in `functions` shares one file — every caller
+/// groups by file before calling, which is what makes stripping the (here,
+/// constant) file component of [`blended_scores`]'s key lossless. Passing
+/// functions from more than one file collapses same-numbered lines from
+/// different files onto one key; that generalisation is [`repo_scores`].
 #[must_use]
 pub fn file_scores(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, f64> {
+    blended_scores(functions)
+        .into_iter()
+        .map(|((_, line), v)| (line, v))
+        .collect()
+}
+
+/// [`file_scores`]'s cross-file generalisation: the identical call-graph
+/// weighting and rank-normalisation, but computed once over every scored
+/// function passed in — which may span the whole repository or folder input
+/// — and keyed by `(file, line)` since two different files can reuse the
+/// same line number. Where a [`file_scores`] caller restricts `functions` to
+/// one file (blocking the call graph at that file's boundary), a
+/// [`repo_scores`] caller passes every scored function at once, so
+/// `resolve_callee` can match a call across a file boundary and the
+/// re-ranking runs over every file's lines together.
+#[must_use]
+pub fn repo_scores(functions: &[ScopedFunction<'_>]) -> BTreeMap<(String, u32), f64> {
+    blended_scores(functions)
+}
+
+/// The shared core behind [`file_scores`] and [`repo_scores`]: each
+/// function's within-function line score multiplied by its call-graph
+/// weight, then rank-normalised across every scored line among `functions`,
+/// keyed by `(file, line)`.
+fn blended_scores(functions: &[ScopedFunction<'_>]) -> BTreeMap<(String, u32), f64> {
     let weights = function_weights(functions);
-    let owners = line_owners(functions);
-    let lines: Vec<u32> = owners.keys().copied().collect();
-    let raw: Vec<f64> = lines
+    let owners = line_owners_by_file(functions);
+    let keys: Vec<(String, u32)> = owners.keys().cloned().collect();
+    let raw: Vec<f64> = keys
         .iter()
-        .map(|line| {
-            let i = owners[line];
+        .map(|key @ (_, line)| {
+            let i = owners[key];
             weights[i] * functions[i].line_scores.get(line).copied().unwrap_or(0.0)
         })
         .collect();
-    lines.into_iter().zip(rank01(&raw)).collect()
+    keys.into_iter().zip(rank01(&raw)).collect()
 }
 
 /// Per-line owning function index into `functions`, by the attribution rule
 /// [`file_scores`] blends with: narrowest scored-line extent wins, the
 /// first-encountered function breaking ties. Public so consumers reporting
 /// per-line data (calibration's dataset rows) attribute it identically.
+///
+/// Assumes every function in `functions` shares one file — see
+/// [`file_scores`]'s note; [`line_owners_by_file`] is the generalisation
+/// that keeps the file component.
 #[must_use]
 pub fn line_owners(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, usize> {
-    let mut owner: BTreeMap<u32, (usize, u32)> = BTreeMap::new();
+    line_owners_by_file(functions)
+        .into_iter()
+        .map(|((_, line), i)| (line, i))
+        .collect()
+}
+
+/// [`line_owners`]'s cross-file generalisation, keyed by `(file, line)` —
+/// the attribution [`repo_scores`] blends with.
+#[must_use]
+pub fn line_owners_by_file(functions: &[ScopedFunction<'_>]) -> BTreeMap<(String, u32), usize> {
+    let mut owner: BTreeMap<(String, u32), (usize, u32)> = BTreeMap::new();
     for (i, f) in functions.iter().enumerate() {
         let Some(&lo) = f.line_scores.keys().next() else {
             continue;
@@ -104,8 +168,9 @@ pub fn line_owners(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, usize> {
         let hi = *f.line_scores.keys().next_back().unwrap_or(&lo);
         let width = hi - lo;
         for &line in f.line_scores.keys() {
+            let key = (f.ir.id.file.clone(), line);
             owner
-                .entry(line)
+                .entry(key)
                 .and_modify(|cur| {
                     if width < cur.1 {
                         *cur = (i, width);
@@ -114,7 +179,7 @@ pub fn line_owners(functions: &[ScopedFunction<'_>]) -> BTreeMap<u32, usize> {
                 .or_insert((i, width));
         }
     }
-    owner.into_iter().map(|(line, (i, _))| (line, i)).collect()
+    owner.into_iter().map(|(key, (i, _))| (key, i)).collect()
 }
 
 /// A function's four rank-normalised call-graph signals, individually —
@@ -644,5 +709,173 @@ mod tests {
     fn empty_input_is_empty() {
         assert!(file_scores(&[]).is_empty());
         assert!(function_weights(&[]).is_empty());
+    }
+
+    fn fid_in(file: &str, name: &str) -> FunctionId {
+        FunctionId {
+            file: file.into(),
+            name: name.into(),
+            signature: String::new(),
+            decl_line: Some(1),
+        }
+    }
+
+    fn call(line: u32, callee: &str) -> Node {
+        Node {
+            line: Some(line),
+            kind: NodeKind::Call {
+                callee: callee.into(),
+                opacity: CallOpacity::Opaque,
+            },
+            defs: Vec::new(),
+            uses: Vec::new(),
+            succs: Vec::new(),
+            label: String::new(),
+        }
+    }
+
+    /// A hub with real work in its body - including a call to its own
+    /// private `helper`, in the same file - called by two thin wrappers
+    /// each in its *own* file: the shape `--scope repo` exists for.
+    /// [`resolve_edges`] matches by name across the whole slice regardless
+    /// of file, so this call graph edge would never appear if each
+    /// wrapper's file were scored (and its call graph built) independently,
+    /// the way `--scope file` does. The hub calling `helper` is not
+    /// decoration: it is what [`hub_and_wrappers`]'s own doc comment
+    /// explains keeps call-graph depth from collapsing hub and wrappers
+    /// into the same two-group `rank01` tie that fan-in and size share
+    /// would otherwise produce on their own.
+    fn hub_across_files() -> Vec<FunctionIr> {
+        let hub = FunctionIr {
+            id: fid_in("hub.py", "hub"),
+            nodes: vec![
+                Node::pure(1).with_dataflow([1], []).with_succs([1]),
+                Node::pure(2).with_dataflow([2], [1]).with_succs([2]),
+                Node::pure(3).with_dataflow([3], [2]).with_succs([3]),
+                Node {
+                    line: Some(4),
+                    kind: NodeKind::Call {
+                        callee: "helper".into(),
+                        opacity: CallOpacity::Opaque,
+                    },
+                    defs: vec![4],
+                    uses: vec![3],
+                    succs: vec![4],
+                    label: String::new(),
+                },
+                Node::pure(5)
+                    .with_dataflow([], [4])
+                    .with_kind(NodeKind::Return),
+            ],
+            entry: 0,
+        };
+        let helper = FunctionIr {
+            id: fid_in("hub.py", "helper"),
+            nodes: vec![
+                Node::pure(6).with_dataflow([1], []).with_succs([1]),
+                Node::pure(7)
+                    .with_dataflow([], [1])
+                    .with_kind(NodeKind::Return),
+            ],
+            entry: 0,
+        };
+        let wrapper_a = FunctionIr {
+            id: fid_in("wrapper_a.py", "wrapper_a"),
+            nodes: vec![call(1, "hub")],
+            entry: 0,
+        };
+        let wrapper_b = FunctionIr {
+            id: fid_in("wrapper_b.py", "wrapper_b"),
+            nodes: vec![call(1, "hub")],
+            entry: 0,
+        };
+        vec![hub, helper, wrapper_a, wrapper_b]
+    }
+
+    #[test]
+    fn repo_scores_resolves_calls_across_file_boundaries() {
+        let irs = hub_across_files();
+        let denylist = Denylist::new();
+        let weights = ScoreWeights::default();
+        let sals: Vec<_> = irs
+            .iter()
+            .map(|ir| analyze(ir, &denylist, &weights))
+            .collect();
+        let lines: Vec<_> = irs.iter().map(line_scores_from_lines).collect();
+        let functions: Vec<ScopedFunction<'_>> = (0..irs.len())
+            .map(|i| ScopedFunction {
+                ir: &irs[i],
+                importance: &sals[i],
+                line_scores: &lines[i],
+            })
+            .collect();
+
+        let scored = repo_scores(&functions);
+        let hub_peak = scored[&("hub.py".to_owned(), 5)];
+        let peak_a = scored[&("wrapper_a.py".to_owned(), 1)];
+        let peak_b = scored[&("wrapper_b.py".to_owned(), 1)];
+        assert!(
+            hub_peak > peak_a && hub_peak > peak_b,
+            "hub {hub_peak} should outrank its cross-file callers ({peak_a}, {peak_b})"
+        );
+
+        // Fan-in only counts once resolve_edges can see both wrappers' call
+        // sites, which only happens when every function - regardless of
+        // file - is scored in one pass. A per-file pass (what --scope file
+        // does with this same fixture) would leave the hub with zero
+        // in-file callers, since each wrapper's own file never contains the
+        // hub that calls it.
+        let features = function_features(&functions);
+        assert!(
+            features[0].fan_in > features[2].fan_in,
+            "hub's fan-in must reflect both cross-file callers: {features:?}"
+        );
+    }
+
+    #[test]
+    fn repo_scores_keys_same_numbered_lines_from_different_files_separately() {
+        let a = FunctionIr {
+            id: fid_in("a.py", "solo_a"),
+            nodes: vec![Node::pure(1).with_kind(NodeKind::Return)],
+            entry: 0,
+        };
+        let b = FunctionIr {
+            id: fid_in("b.py", "solo_b"),
+            nodes: vec![Node::pure(1).with_kind(NodeKind::Return)],
+            entry: 0,
+        };
+        let denylist = Denylist::new();
+        let weights = ScoreWeights::default();
+        let sal_a = analyze(&a, &denylist, &weights);
+        let sal_b = analyze(&b, &denylist, &weights);
+        let mut lines_a = BTreeMap::new();
+        lines_a.insert(1u32, 0.3);
+        let mut lines_b = BTreeMap::new();
+        lines_b.insert(1u32, 0.9);
+        let functions = [
+            ScopedFunction {
+                ir: &a,
+                importance: &sal_a,
+                line_scores: &lines_a,
+            },
+            ScopedFunction {
+                ir: &b,
+                importance: &sal_b,
+                line_scores: &lines_b,
+            },
+        ];
+        let scored = repo_scores(&functions);
+        assert_eq!(
+            scored.len(),
+            2,
+            "both files' line 1 must survive as distinct keys"
+        );
+        assert!(scored.contains_key(&("a.py".to_owned(), 1)));
+        assert!(scored.contains_key(&("b.py".to_owned(), 1)));
+    }
+
+    #[test]
+    fn repo_scores_empty_input_is_empty() {
+        assert!(repo_scores(&[]).is_empty());
     }
 }

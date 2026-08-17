@@ -30,6 +30,15 @@ pub mod ext {
     pub const JVM_SOURCE: &[&str] = &["java", "kt", "kts"];
 }
 
+/// Directory names a source walk never descends into, beyond anything
+/// dot-prefixed: build output, dependency caches and virtualenvs holding no
+/// source of ours to lower. Shared by a folder or repo-scope input's walk
+/// ([`crate::lowering::walk_registry_sources`]) and `vikt calibrate`'s tree
+/// scan, which additionally stages `node_modules` into its copy unscored
+/// rather than skipping it outright, so a JavaScript suite still has its
+/// dependencies to run against.
+pub const SKIP_DIRS: &[&str] = &["node_modules", "target", "venv", "__pycache__"];
+
 /// What an input file's extension selects, for `main`'s dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputKind {

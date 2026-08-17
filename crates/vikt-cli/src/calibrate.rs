@@ -54,13 +54,6 @@ const MAX_INSTRUCTIONS: usize = 4096;
 /// code should not make calibration copy them.
 const MAX_COPY_BYTES: u64 = 8 * 1024 * 1024;
 
-/// Directory names never copied, beyond everything dot-prefixed: build
-/// output and vendored trees, where mutants would measure someone else's
-/// code against this repository's tests. `node_modules` is handled
-/// separately (see [`TreeScan::node_modules`]): it must exist in the copy
-/// for a JavaScript suite to run, but never as scored or mutated source.
-const SKIP_DIRS: &[&str] = &["__pycache__", "target", "venv"];
-
 /// Extensions calibrate cannot mutate — analyzable inputs without a
 /// mutation engine — for an honest "not supported" error instead of a
 /// puzzling "no sources found". Derived from the registry's tables so the
@@ -86,6 +79,18 @@ enum Scope {
     /// extent instead of the one owning function's. Verdict machinery
     /// (pooled Spearman, thresholds) is unchanged either way.
     File,
+    /// [`vikt_core::repo_scores`]'s cross-file generalisation of `File`, one
+    /// rung up: the call-graph-weighted blend is computed once across every
+    /// scored function of the whole tree, cross-file edges included, rather
+    /// than once per file. The positional null does *not* also grow into a
+    /// whole-tree extent — line numbers reset per file, so a single extent
+    /// spanning every file would be meaningless — it stays exactly `File`'s
+    /// construction, each mutated line measured against its own file's
+    /// scored-line extent, simply pooled across every file the sample
+    /// touches, mirroring how `File`'s own null already pools every
+    /// sampled function's extent within one file. Verdict machinery is
+    /// unchanged.
+    Repo,
 }
 
 #[derive(Debug, clap::Args)]
@@ -158,13 +163,14 @@ pub struct CalibrateArgs {
     #[arg(long, default_value = "python3")]
     pub python: String,
 
-    /// Measure the panel against `vikt_core::filescope`'s
-    /// call-graph-weighted blend across each line's file (`file`, the
-    /// default — matching what a default `vikt` invocation scores) or
-    /// against each sampled line's own function alone (`function`).
-    /// `--emit-dataset` rows always carry both the file-scope score and its
-    /// function features regardless of this flag; only the reported
-    /// correlations and verdict change.
+    /// Measure the panel against `vikt_core::filescope`'s call-graph-weighted
+    /// blend across each line's file (`file`, the default — matching what a
+    /// default `vikt` invocation scores); against each sampled line's own
+    /// function alone (`function`); or against that same blend computed once
+    /// across the whole tree, cross-file edges included (`repo`). See
+    /// [`Scope`]. `--emit-dataset` rows always carry both the file-scope
+    /// score and its function features regardless of this flag; only the
+    /// reported correlations and verdict change.
     #[arg(long, value_enum, default_value_t = Scope::File)]
     scope: Scope,
 
@@ -381,10 +387,29 @@ repository's own type check is read as killed, indistinguishable from one an act
     } else {
         Filescope::default()
     };
-    if args.scope == Scope::File {
-        println!(
+    // `--scope repo` needs its own layer: the same four features and the
+    // same blended score, but computed once across the whole tree with
+    // cross-file edges allowed, rather than once per file the way
+    // `filescope` above is. `--emit-dataset` never reads this one — its
+    // `function_features`/`file_score` columns stay file-scope regardless
+    // of `--scope`, exactly as documented on `write_dataset`.
+    let repo_filescope = if args.scope == Scope::Repo {
+        repo_filescope_layer(&scored)
+    } else {
+        Filescope::default()
+    };
+    let verdict_scores = match args.scope {
+        Scope::Function | Scope::File => &filescope.scores,
+        Scope::Repo => &repo_filescope.scores,
+    };
+    match args.scope {
+        Scope::Function => {}
+        Scope::File => println!(
             "calibrate: scope file — panel score and positional null measured against the file's call-graph-weighted blend, not each function alone"
-        );
+        ),
+        Scope::Repo => println!(
+            "calibrate: scope repo — panel score measured against the whole tree's call-graph-weighted blend, cross-file edges included; positional null stays each mutated line's own file extent, pooled across every file"
+        ),
     }
 
     let (mutants, candidates, invalid_discarded) =
@@ -422,7 +447,7 @@ repository's own type check is read as killed, indistinguishable from one an act
         );
     }
 
-    let pairs = pair_lines(sampled, &file_scores, &filescope.scores, args.scope, &tally);
+    let pairs = pair_lines(sampled, &file_scores, verdict_scores, args.scope, &tally);
     let v = judge(sampled, &pairs, &tally);
     if let Some(path) = &args.emit_dataset {
         let rows = write_dataset(
@@ -680,6 +705,15 @@ fn score_functions(
                 }
             }
         }
+        // Retained `ir` carries whatever absolute copy path the frontend
+        // lowered from; `--scope repo` keys vikt-core's cross-file call
+        // graph on `ir.id.file`, so it is normalised here to the same
+        // tree-relative path every other field on `ScoredFn` already uses —
+        // otherwise a repo-wide pass would key every function under a
+        // distinct absolute path and never group two functions into the
+        // same file.
+        let mut ir = ir.clone();
+        ir.id.file = rel.display().to_string();
         scored.push(ScoredFn {
             file: rel.to_path_buf(),
             name: ir.id.name.clone(),
@@ -687,7 +721,7 @@ fn score_functions(
             hi,
             lines,
             feats,
-            ir: ir.clone(),
+            ir,
             importance: base,
             line_scores,
         });
@@ -745,6 +779,45 @@ fn filescope_layer(scored: &[ScoredFn]) -> Filescope {
         layer
             .scores
             .insert(file.to_path_buf(), vikt_core::file_scores(&functions));
+    }
+    layer
+}
+
+/// The repo-scope generalisation of [`filescope_layer`], one rung up: the
+/// same four call-graph features and the same blended-and-reranked score,
+/// but computed *once* across every scored function in `scored` regardless
+/// of file — so [`vikt_core::function_features`]'s call graph can match a
+/// call across a file boundary, and [`vikt_core::repo_scores`]'s re-rank
+/// runs over every scored line of the whole tree at once — then regrouped
+/// by file into the identical [`Filescope`] shape `filescope_layer`
+/// produces, so [`pair_lines`]'s positional-null construction (each line's
+/// own file's scored-line extent) needs no scope-specific branch at all.
+fn repo_filescope_layer(scored: &[ScoredFn]) -> Filescope {
+    let functions: Vec<ScopedFunction<'_>> = scored
+        .iter()
+        .map(|f| ScopedFunction {
+            ir: &f.ir,
+            importance: &f.importance,
+            line_scores: &f.line_scores,
+        })
+        .collect();
+    let mut layer = Filescope {
+        features: vikt_core::function_features(&functions),
+        ..Filescope::default()
+    };
+    for ((file, line), i) in vikt_core::line_owners_by_file(&functions) {
+        layer
+            .owners
+            .entry(PathBuf::from(file))
+            .or_default()
+            .insert(line, i);
+    }
+    for ((file, line), score) in vikt_core::repo_scores(&functions) {
+        layer
+            .scores
+            .entry(PathBuf::from(file))
+            .or_default()
+            .insert(line, score);
     }
     layer
 }
@@ -916,15 +989,19 @@ struct PairedLine {
 ///
 /// Under [`Scope::Function`] `panel`/`null` are exactly as before: the
 /// owning sampled function's own score and positional extent. Under
-/// [`Scope::File`] both come from `filescope` instead — the call-graph
-/// blended score, and the positional null measured over the whole file's
-/// scored-line extent rather than one function's. `owner` (used for
+/// [`Scope::File`] and [`Scope::Repo`] both come from `verdict_scores`
+/// instead — [`Scope::File`]'s caller passes the file-scope blend,
+/// [`Scope::Repo`]'s the repo-scope one — and the positional null is
+/// measured over each line's own file's whole scored-line extent rather
+/// than one function's, exactly the same construction for both scopes: the
+/// difference between them is entirely in which blend `verdict_scores`
+/// holds, never in how the null is built from it. `owner` (used for
 /// per-function reporting and the dataset's function features) is found the
-/// same way either way.
+/// same way regardless of scope.
 fn pair_lines(
     sampled: &[ScoredFn],
     file_scores: &FileScores,
-    filescope: &FileScores,
+    verdict_scores: &FileScores,
     scope: Scope,
     tally: &Tally,
 ) -> Vec<PairedLine> {
@@ -939,7 +1016,7 @@ fn pair_lines(
             .map(|(i, _)| i);
         let panel_score = match scope {
             Scope::Function => file_scores.get(file).and_then(|m| m.get(line)),
-            Scope::File => filescope.get(file).and_then(|m| m.get(line)),
+            Scope::File | Scope::Repo => verdict_scores.get(file).and_then(|m| m.get(line)),
         };
         let (Some(owner), Some(&panel_score)) = (owner, panel_score) else {
             unscored += 1;
@@ -954,10 +1031,10 @@ fn pair_lines(
                     1.0
                 }
             }
-            Scope::File => {
-                let extent = filescope
-                    .get(file)
-                    .expect("filescope carries this file: `panel_score` above matched against it");
+            Scope::File | Scope::Repo => {
+                let extent = verdict_scores.get(file).expect(
+                    "verdict_scores carries this file: `panel_score` above matched against it",
+                );
                 let file_lo = *extent
                     .keys()
                     .next()
@@ -1265,7 +1342,11 @@ fn walk(
                 scan.node_modules.push(rel);
                 continue;
             }
-            if SKIP_DIRS.contains(&name.as_ref()) {
+            // `node_modules` is handled above (staged into the copy
+            // unscored, never skipped outright) before this generic check
+            // runs, so its presence in the shared list here is redundant
+            // but harmless.
+            if language::SKIP_DIRS.contains(&name.as_ref()) {
                 continue;
             }
             walk(root, &path, scan, visited)?;

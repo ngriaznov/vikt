@@ -18,6 +18,8 @@ use clap::ValueEnum;
 use vikt_core::PanelProfile;
 use vikt_core::ir::FunctionIr;
 
+use crate::language;
+
 /// Which lowering strategy to use for a language that has both a primary
 /// (bytecode/MIR) frontend and this crate's tree-sitter fallback. Global to
 /// `analyze` and `calibrate` both.
@@ -283,4 +285,141 @@ fn walk_rust_sources_into(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> st
         }
     }
     Ok(())
+}
+
+/// The stderr note describing how a `.class` file's line numbers were
+/// resolved, shared between a single `.class` input (threaded through the
+/// caller and printed once scoring finishes) and a `.class` file found
+/// inside a [`lower_folder`] walk (printed immediately, since a folder can
+/// contain more than one).
+#[must_use]
+pub fn class_note(lowered: &vikt_jvm::LoweredClass) -> Option<String> {
+    lowered.smap_stratum.as_ref().map(|stratum| {
+        format!(
+            "{}: line numbers resolved through the SourceDebugExtension \
+(JSR-45/SMAP, `{stratum}` stratum); inlined bodies collapsed onto their call sites\
+{}",
+            lowered.binary_name,
+            if lowered.foreign_lines_dropped > 0 {
+                format!(
+                    ", {} instruction(s) dropped as belonging to another source file",
+                    lowered.foreign_lines_dropped
+                )
+            } else {
+                String::new()
+            }
+        )
+    })
+}
+
+/// Every registry-known source file under `root`, relative to it and
+/// classified — the walk behind a plain-directory `vikt` input and a
+/// `Cargo.toml` directory's non-Rust sources. Skips dot-directories and the
+/// conventional non-source directories ([`language::SKIP_DIRS`]), the same
+/// skip conventions `vikt calibrate`'s tree scan applies to its own copy.
+/// Sorted by relative path, so a walk is order-deterministic like every
+/// other file discovery in this crate.
+///
+/// # Errors
+///
+/// Any I/O failure reading a directory under `root`.
+pub fn walk_registry_sources(root: &Path) -> std::io::Result<Vec<(PathBuf, language::InputKind)>> {
+    let mut out = Vec::new();
+    walk_registry_sources_into(root, root, &mut out)?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn walk_registry_sources_into(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<(PathBuf, language::InputKind)>,
+) -> std::io::Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<_, _>>()?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if entry.file_type()?.is_dir() {
+            if name.starts_with('.') || language::SKIP_DIRS.contains(&name.as_ref()) {
+                continue;
+            }
+            walk_registry_sources_into(root, &path, out)?;
+        } else if let Some(kind) = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(language::classify)
+        {
+            let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+            out.push((rel, kind));
+        }
+    }
+    Ok(())
+}
+
+/// Lowers every registry-known source file under a plain directory input,
+/// skipping any [`language::InputKind`] in `skip` — a `Cargo.toml`
+/// directory's extra scan passes `&[InputKind::Rust]` since cargo mode
+/// already lowered every `.rs` file through [`lower_rust_crate`]; a bare
+/// directory input passes nothing. Each file lowers through whichever
+/// frontend its extension selects, exactly as a single-file `vikt`
+/// invocation would — `lowering` governs every Python, Rust or `.class` file
+/// found, same as it does for a single-file input. A file whose frontend
+/// fails to lower it is reported on stderr and skipped: one broken file in a
+/// folder should not block scoring the rest of it, the policy `calibrate`'s
+/// tree scan already uses.
+///
+/// # Errors
+///
+/// Any I/O failure walking `root` itself; per-file lowering failures are
+/// reported on stderr and skipped, not propagated.
+pub fn lower_folder(
+    root: &Path,
+    python: &str,
+    lowering: Lowering,
+    skip: &[language::InputKind],
+) -> std::io::Result<Vec<Lowered>> {
+    let mut out = Vec::new();
+    for (rel, kind) in walk_registry_sources(root)? {
+        if skip.contains(&kind) {
+            continue;
+        }
+        let abs = root.join(&rel);
+        match lower_one(&abs, kind, python, lowering) {
+            Ok(lowered) => out.push(lowered),
+            Err(e) => eprintln!("vikt: skipping {}: {e}", rel.display()),
+        }
+    }
+    Ok(out)
+}
+
+/// Lowers one file through whichever frontend `kind` selects — [`lower_folder`]'s
+/// per-extension dispatch, mirroring `main`'s single-file dispatch exactly so
+/// a file scores the same whether it is handed to `vikt` alone or found
+/// inside a folder.
+fn lower_one(
+    path: &Path,
+    kind: language::InputKind,
+    python: &str,
+    lowering: Lowering,
+) -> Result<Lowered, Box<dyn std::error::Error>> {
+    match kind {
+        language::InputKind::ClassFile => {
+            let bytes = std::fs::read(path)?;
+            let lowered = vikt_jvm::lower_class(&bytes)?;
+            if let Some(note) = class_note(&lowered) {
+                eprintln!("vikt: note: {note}");
+            }
+            Ok(Lowered {
+                generator: "vikt-jvm/mokapot".to_owned(),
+                functions: lowered.functions,
+                profile: PanelProfile::Instruction,
+            })
+        }
+        language::InputKind::Python => lower_python(path, python, lowering),
+        language::InputKind::JsTs => lower_js(path, lowering),
+        language::InputKind::JvmSource => lower_ts_source(path),
+        language::InputKind::Rust => lower_rust_file(path, lowering),
+    }
 }

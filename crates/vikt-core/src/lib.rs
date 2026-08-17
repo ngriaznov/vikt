@@ -26,7 +26,12 @@
 //! - **Not criterion-anchored.** Classic slicing answers "what affects *this*".
 //!   This answers "what carries behavior at all", unconditionally, so the result
 //!   is computed once and cached rather than recomputed per question.
-//! - **Not repo-level ranking.** The unit is the statement inside one body.
+//! - **The unit stays the statement inside one body.** [`filescope`] blends in
+//!   a function's standing among its neighbours — intra-file by default,
+//!   whole-repo under `--scope repo` — but only as an additive reweighting on
+//!   top of the intraprocedural analysis above; nothing here builds an
+//!   interprocedural dataflow or points-to graph, and the base per-statement
+//!   tiers are exactly as intraprocedural as ever.
 //!
 //! # Analysis scope
 //!
@@ -96,7 +101,8 @@ pub mod trophic;
 pub use artifact::{Sidecar, SpanRecord};
 pub use calibration::{Verdict, spearman, verdict};
 pub use filescope::{
-    FunctionFeatures, ScopedFunction, file_scores, function_features, function_weights, line_owners,
+    FunctionFeatures, ScopedFunction, file_scores, function_features, function_weights,
+    line_owners, line_owners_by_file, repo_scores,
 };
 pub use graph::Graph;
 pub use importance::{

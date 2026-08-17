@@ -376,6 +376,8 @@ vikt app.ts                             # TS/JS: statement-profile panel
 vikt lib.rs                             # Rust via MIR (build tools/rust-lower once)
 vikt Foo.java                           # Java source, tree-sitter (new capability)
 vikt path/to/package --package foo      # whole cargo package, deps compiled not analyzed
+vikt path/to/folder                     # any directory: every known extension, one sidecar
+vikt path/to/repo --scope repo          # call-graph blend across the whole run, not just one file
 vikt foo.py --scorer strahler           # one instrument alone
 vikt foo.py --scorer current            # the incumbent alone
 vikt big.py --max-instructions 0        # lift the data-table size guard
@@ -398,7 +400,19 @@ failures do not overlap. Use a single instrument to re-fit weights against
 new labels, to see which facet drove a surprising score, or to verify a
 refactor left a member byte-identical — never as the score a consumer reads.
 
-### File scope
+### Folder input
+
+A directory with no `Cargo.toml` is a first-class multi-language input: `vikt`
+walks it (skipping dot-directories, `node_modules`, `target`, `venv`,
+`__pycache__`), lowers every file whose extension a frontend claims through
+that frontend, and folds the whole tree into one sidecar — a Python module, a
+JS build script and a Java helper class all in one run, one JSON artifact,
+`FunctionRecord.file` distinguishing them the same way cargo-package mode
+already does. A directory *with* `Cargo.toml` keeps cargo mode for its `.rs`
+files exactly as before, and now additionally lowers any other-language
+sources the package directory contains, noted on stderr.
+
+### File and repo scope
 
 By default every line's score blends two layers: its standing inside its own
 function (the panel above) and its function's standing in the file — a
@@ -408,8 +422,20 @@ call graph with conservative name matching. The blend is re-ranked across
 the file and emitted as `file_score` on every sidecar span; `score`, `rank`
 and tiers are untouched, and files never compete with each other. `--scope
 function` drops the layer and restores the pre-file-scope artifact
-byte-for-byte. `vikt calibrate` measures whichever scope it is given
-(default `file`, against a file-wide positional null).
+byte-for-byte.
+
+`--scope repo` is the same apparatus one rung up: the four call-graph
+signals and the blend are computed *once* across every scored function of
+the run, cross-file edges allowed (still conservative name matching — an
+ambiguous callee resolves to no edge, never a guess), and the re-rank runs
+over every scored line of the run at once instead of per file. Emitted as
+`repo_score`, additive next to `file_score`; a single-file input can still
+ask for it, but it earns its keep on a folder, a cargo package, or anything
+spanning more than one file. `vikt calibrate` measures whichever scope it is
+given (default `file`, against a file-wide positional null; `repo` pairs the
+same cross-file blend against that same per-file positional null, pooled
+across every file the run touches — line numbers reset per file, so the null
+stays file-local even when the panel score no longer is).
 
 ### SARIF output
 
@@ -435,9 +461,10 @@ positional null the bakeoffs use, because a panel that cannot beat "earlier
 is more important" on a tree has nothing to offer it.
 
 ```bash
-vikt calibrate path/to/repo --test-cmd "python3 -m unittest"   # Python
-vikt calibrate path/to/app  --test-cmd "node --test"           # JavaScript/TypeScript
-vikt calibrate path/to/pkg  --test-cmd "cargo test"            # Rust (a cargo package)
+vikt calibrate path/to/repo --test-cmd "python3 -m unittest"          # Python
+vikt calibrate path/to/app  --test-cmd "node --test"                  # JavaScript/TypeScript
+vikt calibrate path/to/pkg  --test-cmd "cargo test"                   # Rust (a cargo package)
+vikt calibrate path/to/repo --test-cmd "..." --scope repo             # cross-file call graph, not just one file
 ```
 
 The test command runs with `sh -c` from the root of a temporary copy of the

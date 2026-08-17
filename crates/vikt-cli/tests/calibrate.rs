@@ -134,6 +134,37 @@ fn scope_file_runs_and_announces_itself() {
     assert!(stdout.contains("verdict:"), "stdout:\n{stdout}");
 }
 
+/// `--scope repo`: the run completes, announces the repo-scope notice — the
+/// cross-file generalisation of the `--scope file` one above — and still
+/// reaches a verdict.
+#[test]
+fn scope_repo_runs_and_announces_itself() {
+    if !python_available() {
+        eprintln!("skipping: python3 not on PATH");
+        return;
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args([
+            "calibrate",
+            FIXTURE,
+            "--test-cmd",
+            "python3 -m unittest discover",
+            "--scope",
+            "repo",
+        ])
+        .output()
+        .expect("running the vikt binary");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        stdout.contains("scope repo"),
+        "the repo-scope notice must be printed:\n{stdout}"
+    );
+    assert!(stdout.contains("pooled Spearman rho"), "stdout:\n{stdout}");
+    assert!(stdout.contains("verdict:"), "stdout:\n{stdout}");
+}
+
 /// Starving the run of budget lands under the mutant floor, and with `--gate`
 /// that is exit code 2: "not enough data" is a different answer from
 /// "uncalibrated" (3), and a CI job must be able to tell them apart.

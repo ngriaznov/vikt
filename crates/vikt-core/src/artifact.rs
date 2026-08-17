@@ -23,14 +23,15 @@ use crate::ir::FunctionIr;
 
 /// Schema identifier, bumped on any breaking change to the shape below.
 ///
-/// `SpanRecord::file_score` (added for `--scope file`) is deliberately *not*
-/// such a change: it is optional, defaults to absent, and every struct here
-/// derives plain `Serialize`/`Deserialize` with no `deny_unknown_fields`, so
-/// an old reader ignores the new key and a new reader sees `None` on output
-/// that never set it. Reserve schema bumps for changes that remove, rename,
-/// or repurpose an existing field's meaning — exactly what v2 is: v1's
-/// per-span `score` is `function_score` from v2 on, renamed so its scope is
-/// unambiguous next to `file_score`.
+/// `SpanRecord::file_score` (added for `--scope file`) and
+/// `SpanRecord::repo_score` (added for `--scope repo`) are deliberately
+/// *not* such a change: each is optional, defaults to absent, and every
+/// struct here derives plain `Serialize`/`Deserialize` with no
+/// `deny_unknown_fields`, so an old reader ignores the new key and a new
+/// reader sees `None` on output that never set it. Reserve schema bumps for
+/// changes that remove, rename, or repurpose an existing field's meaning —
+/// exactly what v2 is: v1's per-span `score` is `function_score` from v2 on,
+/// renamed so its scope is unambiguous next to `file_score`.
 pub const SCHEMA: &str = "vikt-sidecar/v2";
 
 /// One tiered run of source lines.
@@ -57,6 +58,16 @@ pub struct SpanRecord {
     /// files — each file is re-ranked against itself alone.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub file_score: Option<f64>,
+    /// Repo-scope score: [`function_score`](Self::function_score) reweighted
+    /// by the owning function's call-graph standing among *every* scored
+    /// function of the run, cross-file edges included, then
+    /// rank-normalised across every scored line of the whole run (see
+    /// [`crate::filescope::repo_scores`]). Present only under `vikt --scope
+    /// repo`; absent, and omitted from JSON entirely, otherwise. Unlike
+    /// [`file_score`](Self::file_score), comparable across the files of one
+    /// run — that is the point of the wider scope.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub repo_score: Option<f64>,
     /// Why this run got its tier.
     pub reasons: Vec<String>,
 }
@@ -73,6 +84,7 @@ impl SpanRecord {
             function_score: (s.score * 100.0).round() / 100.0,
             rank: (s.rank * 100.0).round() / 100.0,
             file_score: None,
+            repo_score: None,
             reasons: s.reasons.clone(),
         }
     }
@@ -202,16 +214,40 @@ impl Sidecar {
     /// per-file map of line to file-scope score (see
     /// [`crate::filescope::file_scores`]).
     ///
-    /// `by_file` is keyed the way [`FunctionRecord::file`] resolves: a
-    /// function's own `file` when set, otherwise this sidecar's `file`. A
-    /// span whose file has no entry, or whose lines are absent from that
-    /// file's map — a sibling function skipped for being empty, invalid, or
-    /// over `--max-instructions` never contributes lines — keeps
-    /// `file_score: None` rather than guessing. A span spanning more than
-    /// one scored line takes the highest of its lines' scores, the same
-    /// `max`-over-the-run convention [`SpanRecord::function_score`] itself already
-    /// uses.
+    /// See [`Self::apply_scope`] for the shared file-lookup and
+    /// nothing-guessed contract; this is that helper writing into
+    /// [`SpanRecord::file_score`].
     pub fn apply_file_scope(&mut self, by_file: &BTreeMap<String, BTreeMap<u32, f64>>) {
+        self.apply_scope(by_file, |s, v| s.file_score = v);
+    }
+
+    /// Attaches a repo-scope score to every span already pushed, from a
+    /// per-file map of line to repo-scope score — [`crate::filescope::repo_scores`]'s
+    /// `(file, line)` keys regrouped by file, the shape [`Self::apply_scope`]
+    /// expects.
+    ///
+    /// See [`Self::apply_scope`] for the shared file-lookup and
+    /// nothing-guessed contract; this is that helper writing into
+    /// [`SpanRecord::repo_score`].
+    pub fn apply_repo_scope(&mut self, by_file: &BTreeMap<String, BTreeMap<u32, f64>>) {
+        self.apply_scope(by_file, |s, v| s.repo_score = v);
+    }
+
+    /// Shared core behind [`Self::apply_file_scope`] and
+    /// [`Self::apply_repo_scope`]: writes `set`'s target from `by_file`,
+    /// keyed the way [`FunctionRecord::file`] resolves — a function's own
+    /// `file` when set, otherwise this sidecar's `file`. A span whose file
+    /// has no entry, or whose lines are absent from that file's map — a
+    /// sibling function skipped for being empty, invalid, or over
+    /// `--max-instructions` never contributes lines — is left `None` rather
+    /// than guessed. A span spanning more than one scored line takes the
+    /// highest of its lines' scores, the same `max`-over-the-run convention
+    /// [`SpanRecord::function_score`] itself already uses.
+    fn apply_scope(
+        &mut self,
+        by_file: &BTreeMap<String, BTreeMap<u32, f64>>,
+        set: impl Fn(&mut SpanRecord, Option<f64>),
+    ) {
         let sidecar_file = self.file.clone();
         for f in &mut self.functions {
             let file = if f.file.is_empty() {
@@ -228,7 +264,7 @@ impl Sidecar {
                     .fold(None, |acc: Option<f64>, v| {
                         Some(acc.map_or(v, |a| a.max(v)))
                     });
-                s.file_score = peak.map(|v| (v * 100.0).round() / 100.0);
+                set(s, peak.map(|v| (v * 100.0).round() / 100.0));
             }
         }
     }
@@ -245,6 +281,18 @@ impl Sidecar {
             .flat_map(|f| &f.spans)
             .filter(|s| line >= s.start && line <= s.end)
             .filter_map(|s| s.file_score)
+            .fold(None, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))))
+    }
+
+    /// The repo-scope score covering `line`, mirroring [`Self::file_score_at`]
+    /// for [`SpanRecord::repo_score`].
+    #[must_use]
+    pub fn repo_score_at(&self, line: u32) -> Option<f64> {
+        self.functions
+            .iter()
+            .flat_map(|f| &f.spans)
+            .filter(|s| line >= s.start && line <= s.end)
+            .filter_map(|s| s.repo_score)
             .fold(None, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))))
     }
 

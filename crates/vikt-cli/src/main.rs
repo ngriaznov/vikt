@@ -7,6 +7,7 @@
 //! vikt Foo.class --stats         # tier histogram and timing
 //! vikt foo.py --format sarif     # SARIF 2.1.0 for code-scanning uploads
 //! vikt foo.py --scope file       # blend in each function's call-graph standing
+//! vikt src/ --scope repo         # same blend, cross-file, over a whole folder or repo
 //! vikt foo.rs --lowering ast     # force the tree-sitter fallback
 //! vikt Foo.kt                    # Kotlin source - tree-sitter, always
 //! vikt calibrate src/ --test-cmd "python3 -m unittest"  # self-calibration
@@ -25,7 +26,7 @@ mod calibrate;
 mod language;
 mod lowering;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -35,7 +36,7 @@ use lowering::Lowering;
 use vikt_core::ir::FunctionIr;
 use vikt_core::{
     Denylist, FunctionImportance, PanelProfile, SarifLog, ScopedFunction, ScoreWeights, Scorer,
-    Sidecar, Tier, analyze_with_scorer, file_scores, project_to_lines,
+    Sidecar, Tier, analyze_with_scorer, file_scores, project_to_lines, repo_scores,
 };
 
 /// Output shape.
@@ -81,6 +82,16 @@ enum Scope {
     /// different source files.
     #[default]
     File,
+    /// The same call-graph-weighted blend, one rung up: every scored
+    /// function of the whole run contributes to one call graph, cross-file
+    /// edges included, and the re-rank runs over every scored line of the
+    /// run at once rather than per file. Adds a `repo_score` field to every
+    /// sidecar span; `score`, `rank`, `file_score` and tiers are untouched.
+    /// A single-file input still computes it — trivially the same call
+    /// graph `file` scope would build for that one file — but it earns its
+    /// keep on a directory, cargo package, or any input with more than one
+    /// file.
+    Repo,
 }
 
 #[derive(Debug, Parser)]
@@ -103,8 +114,11 @@ struct Args {
     #[command(subcommand)]
     command: Option<Cmd>,
 
-    /// The `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java` or `.kt` file (or a
-    /// Rust cargo package: a directory or `Cargo.toml`) to analyze.
+    /// The `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java` or `.kt` file to
+    /// analyze; a Rust cargo package (a directory with `Cargo.toml`, or a
+    /// `Cargo.toml` path — its other-language sources, if any, are also
+    /// lowered); or any other directory, walked for every registry-known
+    /// source extension it contains, of any language, into one sidecar.
     #[arg(required = true)]
     input: Option<PathBuf>,
 
@@ -150,8 +164,10 @@ struct Args {
     scorer: ScorerArg,
 
     /// Blend each function's standing in its file's call graph into every
-    /// line's score (`file`, the default) or rank lines within their own
-    /// function only (`function`). See [`Scope`].
+    /// line's score (`file`, the default); rank lines within their own
+    /// function only (`function`); or blend each function's standing in the
+    /// *whole run's* call graph, cross-file edges included (`repo`). See
+    /// [`Scope`].
     #[arg(long, value_enum, default_value_t = Scope::File)]
     scope: Scope,
 
@@ -258,7 +274,19 @@ fn main() -> ExitCode {
     })
 }
 
-#[allow(clippy::too_many_lines)] // one match arm per substrate; splitting hides the shape
+/// One lowered function paired with the panel profile fitted to whichever
+/// lowering produced it. A single-substrate input (one file, or a cargo
+/// package's own `.rs` files) has exactly one profile for every function in
+/// it, same as before this type existed; a folder or a `Cargo.toml`
+/// directory's extra non-Rust files can mix bytecode/MIR-lowered files
+/// (`Instruction`) with tree-sitter/oxc-lowered ones (`Statement`) in one
+/// run, and scoring needs to know which is which per function.
+struct FnInput {
+    ir: FunctionIr,
+    profile: PanelProfile,
+}
+
+#[allow(clippy::too_many_lines)] // one stage per pipeline step; splitting hides the shape
 fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let input = args
         .input
@@ -274,89 +302,35 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let weights = ScoreWeights::default();
 
-    let is_crate_input =
-        input.is_dir() || input.file_name().and_then(|f| f.to_str()) == Some("Cargo.toml");
-    let ext = if is_crate_input {
-        "rs"
-    } else {
-        input
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or_default()
-    };
+    let is_crate_input = (input.is_dir() && input.join("Cargo.toml").is_file())
+        || input.file_name().and_then(|f| f.to_str()) == Some("Cargo.toml");
+    let is_folder_input = input.is_dir() && !is_crate_input;
 
     let lower_started = Instant::now();
-    let kind = language::classify(ext);
-    let (generator, functions, note, profile) = match kind {
-        Some(language::InputKind::ClassFile) => {
-            let bytes = std::fs::read(input)?;
-            let lowered = vikt_jvm::lower_class(&bytes)?;
-            let note = lowered.smap_stratum.as_ref().map(|stratum| {
-                format!(
-                    "{}: line numbers resolved through the SourceDebugExtension \
-(JSR-45/SMAP, `{stratum}` stratum); inlined bodies collapsed onto their call sites\
-{}",
-                    lowered.binary_name,
-                    if lowered.foreign_lines_dropped > 0 {
-                        format!(
-                            ", {} instruction(s) dropped as belonging to another source file",
-                            lowered.foreign_lines_dropped
-                        )
-                    } else {
-                        String::new()
-                    }
-                )
-            });
-            (
-                "vikt-jvm/mokapot".to_owned(),
-                lowered.functions,
-                note,
-                PanelProfile::Instruction,
-            )
-        }
-        Some(language::InputKind::Python) => {
-            let lowered = lowering::lower_python(input, &args.python, args.lowering)?;
-            (lowered.generator, lowered.functions, None, lowered.profile)
-        }
-        Some(language::InputKind::JsTs) => {
-            let lowered = lowering::lower_js(input, args.lowering)?;
-            (lowered.generator, lowered.functions, None, lowered.profile)
-        }
-        Some(language::InputKind::JvmSource) => {
-            let lowered = lowering::lower_ts_source(input)?;
-            (lowered.generator, lowered.functions, None, lowered.profile)
-        }
-        Some(language::InputKind::Rust) => {
-            let lowered = if is_crate_input {
-                // Whole package through cargo: every source file of the
-                // primary package, dependencies compiled but not analyzed.
-                lowering::lower_rust_crate(input, args.package.as_deref(), args.lowering)?
-            } else {
-                lowering::lower_rust_file(input, args.lowering)?
-            };
-            (lowered.generator, lowered.functions, None, lowered.profile)
-        }
-        None => {
-            return Err(format!(
-                "unsupported input type {ext:?}: expected one of {}",
-                language::supported_extensions()
-            )
-            .into());
-        }
+    let (generator, functions, note) = if is_folder_input {
+        let (generator, functions) = lower_folder_input(input, args)?;
+        (generator, functions, None)
+    } else if is_crate_input {
+        let (generator, functions) = lower_crate_input(input, args)?;
+        (generator, functions, None)
+    } else {
+        lower_single_file_input(input, args)?
     };
 
     let file_label = functions
         .first()
-        .map_or_else(|| input.display().to_string(), |f| f.id.file.clone());
+        .map_or_else(|| input.display().to_string(), |fi| fi.ir.id.file.clone());
     let mut sidecar = Sidecar::new(file_label, generator);
 
     let lowering = lower_started.elapsed();
     let analysis_started = Instant::now();
     let mut analyzed = 0usize;
-    // Retained only under `--scope file`: file scope needs every sibling
-    // function's tiered analysis at once, unlike the push-as-you-go default.
+    // Retained under `--scope file`/`--scope repo` only: both need every
+    // sibling function's tiered analysis at once, unlike the push-as-you-go
+    // default.
     let mut scoped: Vec<(&FunctionIr, FunctionImportance)> = Vec::new();
-    for ir in &functions {
+    for fi in &functions {
+        let ir = &fi.ir;
         if let Err(e) = ir.validate() {
             eprintln!("vikt: skipping {}: {e}", ir.id.name);
             continue;
@@ -377,17 +351,19 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             ir,
             &denylist,
             &weights,
-            resolve_scorer(args.scorer, profile),
+            resolve_scorer(args.scorer, fi.profile),
         );
         sidecar.push(ir, &sal);
         analyzed += 1;
-        if args.scope == Scope::File {
+        if matches!(args.scope, Scope::File | Scope::Repo) {
             scoped.push((ir, sal));
         }
     }
     sidecar.finish();
-    if args.scope == Scope::File {
-        sidecar.apply_file_scope(&file_scope_by_file(&scoped));
+    match args.scope {
+        Scope::Function => {}
+        Scope::File => sidecar.apply_file_scope(&file_scope_by_file(&scoped)),
+        Scope::Repo => sidecar.apply_repo_scope(&repo_scope_all(&scoped)),
     }
     let analysis = analysis_started.elapsed();
 
@@ -407,10 +383,10 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                     SarifTier::Boundary => Tier::Boundary,
                 })
                 .collect();
-            // Crate mode has a root to relativize file paths against; a
-            // single-file input's path passes through as the artifact
-            // recorded it.
-            let root = is_crate_input.then(|| {
+            // Crate mode and folder mode both have a root to relativize
+            // file paths against; a single-file input's path passes through
+            // as the artifact recorded it.
+            let root = (is_crate_input || is_folder_input).then(|| {
                 if input.is_dir() {
                     input.to_path_buf()
                 } else {
@@ -437,6 +413,153 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     Ok(())
+}
+
+/// A generator string, the functions lowered under it, and — single-file
+/// input only — the deferred `.class` SMAP note. See
+/// [`lower_single_file_input`].
+type SingleFileLowering =
+    Result<(String, Vec<FnInput>, Option<String>), Box<dyn std::error::Error>>;
+
+/// Single-file dispatch: the `.class`, `.rs`, `.py`, `.js`/`.ts`, `.java` or
+/// `.kt` input `main`'s doc comment advertises, one frontend chosen by
+/// extension. The `.class` path's SMAP note is threaded through rather than
+/// printed immediately, preserving the message order a single-file run has
+/// always had (after scoring finishes, before the artifact is printed).
+fn lower_single_file_input(input: &Path, args: &Args) -> SingleFileLowering {
+    let ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    let kind = language::classify(ext).ok_or_else(|| {
+        format!(
+            "unsupported input type {ext:?}: expected one of {}",
+            language::supported_extensions()
+        )
+    })?;
+    let (generator, raw_functions, note, profile) = match kind {
+        language::InputKind::ClassFile => {
+            let bytes = std::fs::read(input)?;
+            let lowered = vikt_jvm::lower_class(&bytes)?;
+            let note = lowering::class_note(&lowered);
+            (
+                "vikt-jvm/mokapot".to_owned(),
+                lowered.functions,
+                note,
+                PanelProfile::Instruction,
+            )
+        }
+        language::InputKind::Python => {
+            let lowered = lowering::lower_python(input, &args.python, args.lowering)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
+        }
+        language::InputKind::JsTs => {
+            let lowered = lowering::lower_js(input, args.lowering)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
+        }
+        language::InputKind::JvmSource => {
+            let lowered = lowering::lower_ts_source(input)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
+        }
+        language::InputKind::Rust => {
+            let lowered = lowering::lower_rust_file(input, args.lowering)?;
+            (lowered.generator, lowered.functions, None, lowered.profile)
+        }
+    };
+    let functions = raw_functions
+        .into_iter()
+        .map(|ir| FnInput { ir, profile })
+        .collect();
+    Ok((generator, functions, note))
+}
+
+/// A cargo package (a directory with `Cargo.toml`, or a `Cargo.toml` path):
+/// every `.rs` file of the primary package through cargo, exactly as
+/// before, plus every other registry-known source file the package
+/// directory contains — a Java helper script, a Python code-gen tool, a
+/// `.js` build step — lowered through its own frontend and folded into the
+/// same run, said on stderr since this is new behavior a reader of older
+/// output would not expect.
+fn lower_crate_input(
+    input: &Path,
+    args: &Args,
+) -> Result<(String, Vec<FnInput>), Box<dyn std::error::Error>> {
+    let root = lowering::rust_package_root(input);
+    // Whole package through cargo: every source file of the primary
+    // package, dependencies compiled but not analyzed.
+    let lowered = lowering::lower_rust_crate(input, args.package.as_deref(), args.lowering)?;
+    let rust_profile = lowered.profile;
+    let mut generators: BTreeSet<String> = [lowered.generator].into_iter().collect();
+    let mut functions: Vec<FnInput> = lowered
+        .functions
+        .into_iter()
+        .map(|ir| FnInput {
+            ir,
+            profile: rust_profile,
+        })
+        .collect();
+
+    let extra = lowering::lower_folder(
+        &root,
+        &args.python,
+        args.lowering,
+        &[language::InputKind::Rust],
+    )?;
+    if !extra.is_empty() {
+        eprintln!(
+            "vikt: note: {} non-Rust source file(s) alongside the cargo package also lowered",
+            extra.len()
+        );
+    }
+    for lowered in extra {
+        generators.insert(lowered.generator);
+        let profile = lowered.profile;
+        functions.extend(
+            lowered
+                .functions
+                .into_iter()
+                .map(|ir| FnInput { ir, profile }),
+        );
+    }
+
+    Ok((
+        generators.into_iter().collect::<Vec<_>>().join(", "),
+        functions,
+    ))
+}
+
+/// A plain directory with no `Cargo.toml`: every registry-known source file
+/// it contains, of any language the registry knows, lowered through
+/// whichever frontend its extension selects and folded into one run — the
+/// folder becomes a first-class multi-language input rather than the
+/// cargo-only error a directory used to produce.
+fn lower_folder_input(
+    input: &Path,
+    args: &Args,
+) -> Result<(String, Vec<FnInput>), Box<dyn std::error::Error>> {
+    let files = lowering::lower_folder(input, &args.python, args.lowering, &[])?;
+    if files.is_empty() {
+        return Err(format!(
+            "no supported source files found under {} (expected one of {})",
+            input.display(),
+            language::supported_extensions()
+        )
+        .into());
+    }
+    let generators: BTreeSet<String> = files.iter().map(|f| f.generator.clone()).collect();
+    let functions: Vec<FnInput> = files
+        .into_iter()
+        .flat_map(|f| {
+            let profile = f.profile;
+            f.functions
+                .into_iter()
+                .map(move |ir| FnInput { ir, profile })
+        })
+        .collect();
+    Ok((
+        generators.into_iter().collect::<Vec<_>>().join(", "),
+        functions,
+    ))
 }
 
 /// Runs [`file_scores`] once per source file among `scoped`, never mixing
@@ -472,6 +595,37 @@ fn file_scope_by_file(
         .collect()
 }
 
+/// Runs [`repo_scores`] once across every function retained under `--scope
+/// repo`, letting the call graph and the re-rank both cross file
+/// boundaries, then regroups its `(file, line)` keys by file — the shape
+/// [`Sidecar::apply_repo_scope`] expects, identical in kind to what
+/// [`file_scope_by_file`] builds per file for [`Sidecar::apply_file_scope`].
+/// Unlike `file_scope_by_file`, this makes exactly one call: repo scope's
+/// whole point is that a sibling in another file can still shape a
+/// function's weight and still share the re-rank.
+fn repo_scope_all(
+    scoped: &[(&FunctionIr, FunctionImportance)],
+) -> BTreeMap<String, BTreeMap<u32, f64>> {
+    let line_scores: Vec<BTreeMap<u32, f64>> = scoped
+        .iter()
+        .map(|(ir, sal)| per_line_scores(ir, sal))
+        .collect();
+    let functions: Vec<ScopedFunction<'_>> = scoped
+        .iter()
+        .zip(&line_scores)
+        .map(|((ir, sal), line_scores)| ScopedFunction {
+            ir,
+            importance: sal,
+            line_scores,
+        })
+        .collect();
+    let mut by_file: BTreeMap<String, BTreeMap<u32, f64>> = BTreeMap::new();
+    for ((file, line), score) in repo_scores(&functions) {
+        by_file.entry(file).or_default().insert(line, score);
+    }
+    by_file
+}
+
 /// A function's within-function score, per source line: [`project_to_lines`]'s
 /// span-level scores expanded to one entry per line, since
 /// [`ScopedFunction::line_scores`] wants a flat per-line map rather than
@@ -496,16 +650,22 @@ fn print_text(sidecar: &vikt_core::Sidecar) {
             } else {
                 format!("{}-{}", s.start, s.end)
             };
-            // Empty when file scope wasn't requested, so default output
-            // stays byte-identical: `--scope file`'s only text-format
-            // footprint is this one extra column, present exactly where
-            // `file_score` is `Some`.
+            // Empty when the corresponding scope wasn't requested, so
+            // default output stays byte-identical: each of `--scope
+            // file`/`--scope repo`'s only text-format footprint is its one
+            // extra column, present exactly where its score is `Some` —
+            // and the two are mutually exclusive, since only one scope
+            // ever runs per invocation.
             let file_score = s
                 .file_score
                 .map(|v| format!(" file {v:.2}"))
                 .unwrap_or_default();
+            let repo_score = s
+                .repo_score
+                .map(|v| format!(" repo {v:.2}"))
+                .unwrap_or_default();
             println!(
-                "  {range:>9}  {:<9} {:.2}{file_score}  {}",
+                "  {range:>9}  {:<9} {:.2}{file_score}{repo_score}  {}",
                 s.tier,
                 s.function_score,
                 s.reasons.first().map_or("", String::as_str)
@@ -514,8 +674,8 @@ fn print_text(sidecar: &vikt_core::Sidecar) {
     }
 }
 
-/// The source with a tier marker per line, plus a file-scope score column
-/// when `scope` is [`Scope::File`].
+/// The source with a tier marker per line, plus a file- or repo-scope score
+/// column matching `scope`.
 fn annotate(source: &Path, sidecar: &vikt_core::Sidecar, scope: Scope) -> std::io::Result<()> {
     let text = std::fs::read_to_string(source)?;
     println!("\n--- {} ---", source.display());
@@ -536,6 +696,12 @@ fn annotate(source: &Path, sidecar: &vikt_core::Sidecar, scope: Scope) -> std::i
                     .map_or_else(|| "     ".to_owned(), |v| format!("{v:>5.2}"));
                 println!("{marker} {file_score} {n:>4} | {line}");
             }
+            Scope::Repo => {
+                let repo_score = sidecar
+                    .repo_score_at(n)
+                    .map_or_else(|| "     ".to_owned(), |v| format!("{v:>5.2}"));
+                println!("{marker} {repo_score} {n:>4} | {line}");
+            }
         }
     }
     Ok(())
@@ -548,7 +714,7 @@ fn print_stats(
     total: usize,
     lowering: std::time::Duration,
     analysis: std::time::Duration,
-    functions: &[FunctionIr],
+    functions: &[FnInput],
 ) {
     let mut core = 0;
     let mut boundary = 0;
@@ -561,7 +727,7 @@ fn print_stats(
         inert += f.summary.inert;
     }
     let lines = core + boundary + plumbing + inert;
-    let instructions: usize = functions.iter().map(FunctionIr::len).sum();
+    let instructions: usize = functions.iter().map(|fi| fi.ir.len()).sum();
     let with_line: usize = sidecar.functions.iter().map(|f| f.coverage.with_line).sum();
 
     eprintln!("\n--- stats ---");
