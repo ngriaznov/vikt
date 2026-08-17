@@ -17,8 +17,15 @@ Pooling and features
 Rows are pooled by the panel profile that produced them (matches
 `vikt_core::panel::PanelProfile`):
 
-  - `instruction` -- bytecode-granular frontends: python + rust here.
-  - `statement`   -- AST-granular frontends: javascript here.
+  - `instruction` -- bytecode-granular frontends: rust (`vikt-rs`/MIR) plus
+    python scored through the `dis`-lowering primary path, here.
+  - `statement`   -- AST-granular frontends: every row whose `profile` field
+    reads `statement`, regardless of source language -- javascript (oxc)
+    and any AST-fallback (`vikt-ts`) language, which today means python
+    scored with `--lowering ast` alongside the javascript corpora. Which
+    bucket a row lands in is a property of *how it was scored*, not what
+    language it's written in, so this pooling needs no per-language special
+    casing: it just trusts each row's own `profile` field.
 
 Each row's `instruments` dict already *is* the exact 7-vector
 `line_features()` computes and `score()` dots against the shipped
@@ -38,13 +45,15 @@ leave each training group out in turn, fit on the rest, score Spearman
 rho against the held-out group's kill_rate, and average. The lambda
 with the best mean inner rho is used for the fold's fit.
 
-Both profiles evaluated here have few groups (3 for instruction, 2 for
-statement). When a fold's *training* set contains fewer than 2 groups,
-group-level inner CV is impossible by construction -- there's nothing
-left to leave out. In that case (every outer fold of the 2-group
-statement profile) this script falls back to row-level leave-one-out
-CV within the lone training group to pick lambda, and says so in the
-report. This is a documented compromise, not silent substitution.
+Group counts vary by profile and grow as more calibration corpora are
+added; see the per-profile tables in the generated report for the
+current counts. When a fold's *training* set contains fewer than 2
+groups, group-level inner CV is impossible by construction -- there's
+nothing left to leave out, so this script falls back to row-level
+leave-one-out CV within the lone training group to pick lambda, and
+says so in the report. This is a documented compromise, not silent
+substitution; it only bites when a profile has exactly 2 groups (an
+outer fold then leaves a single training group behind).
 
 Evaluation
 ----------
@@ -60,6 +69,21 @@ lambda chosen the same way (LOGO over all of that profile's groups).
 It is a different fit from any single outer fold above -- those folds
 each exclude one group -- so it is reported separately, not averaged
 into the held-out numbers.
+
+`*-filescope.jsonl` files, if present in this directory, are skipped:
+they are `--scope file` reruns of corpora already covered here at the
+default `--scope function`, from a separate file-scope calibration
+effort, and would double-count the underlying repos if pooled in.
+
+Decision
+--------
+The report ends with a binding call for the `statement` profile only
+(this script's namesake task): the repo's standing rule adopts the
+refit weights into `crates/vikt-core/src/panel.rs` only if they beat
+the shipped weights held-out on a *majority* of leave-one-group-out
+folds AND on the mean; otherwise the shipped weights stand. The
+`instruction` profile's numbers are reported as a control alongside it
+and are never a candidate for adoption by this script.
 """
 import json
 import sys
@@ -126,9 +150,20 @@ def ridge_fit(X, y, lam):
 
 def load_rows():
     """One row per eval/calibration/*.jsonl line. `root` is the group key
-    (dataset identity); `profile` is the pooling key."""
+    (dataset identity); `profile` is the pooling key.
+
+    Skips `*-filescope.jsonl`: those are `--scope file` reruns of corpora
+    already present here at the default `--scope function` (see
+    `eval/calibration/markupsafe-anomaly.md` s5) -- a different measurement
+    axis from a separate, still-in-progress file-scope calibration effort.
+    Pooling them in here would double-count the underlying repos (same
+    lines, same instruments, two different `root` paths from two clone
+    locations) and mix two calibration questions into one regression.
+    """
     rows = []
     for path in sorted(HERE.glob("*.jsonl")):
+        if path.stem.endswith("-filescope"):
+            continue
         with open(path) as fh:
             for line in fh:
                 line = line.strip()
@@ -254,6 +289,35 @@ def full_profile_fit(groups, lambdas):
     return w, lam, inner_rho, method, len(y)
 
 
+def languages_for_profile(rows, profile):
+    """Sorted distinct `language` values feeding this profile -- drives the
+    substrate label in the report instead of a hardcoded language list."""
+    return sorted({r["language"] for r in rows if r["profile"] == profile})
+
+
+def adoption_decision(r):
+    """The repo's standing rule: adopt a profile's refit weights only if
+    they beat the shipped weights held-out on a *majority* of groups AND on
+    the mean. Both conditions on the same leave-one-group-out numbers the
+    report already prints -- nothing computed here that isn't in the outer
+    table."""
+    wins = sum(1 for o in r["outer"] if o["rho_refit"] > o["rho_current"])
+    total = len(r["outer"])
+    mc = sum(o["rho_current"] for o in r["outer"]) / total
+    mr = sum(o["rho_refit"] for o in r["outer"]) / total
+    majority = wins > total / 2
+    beats_mean = mr > mc
+    return {
+        "adopt": majority and beats_mean,
+        "wins": wins,
+        "total": total,
+        "majority": majority,
+        "mean_current": mc,
+        "mean_refit": mr,
+        "beats_mean": beats_mean,
+    }
+
+
 def main():
     rows = load_rows()
     by_profile = group_matrices(rows)
@@ -270,6 +334,7 @@ def main():
         )
         report[profile] = {
             "groups": {g: len(y) for g, (_, y) in groups.items()},
+            "languages": languages_for_profile(rows, profile),
             "n_total": n_total,
             "outer": outer,
             "full_weights": full_w,
@@ -278,6 +343,7 @@ def main():
             "full_method": full_method,
             "current_weights": current_w,
         }
+        report[profile]["decision"] = adoption_decision(report[profile])
 
     write_report(report)
     print_summary(report)
@@ -303,6 +369,10 @@ def print_summary(report):
         mr = sum(o["rho_refit"] for o in r["outer"]) / len(r["outer"])
         mp = sum(o["rho_position"] for o in r["outer"]) / len(r["outer"])
         print(f"{'mean':<14}{'':>5}{mc:>10.3f}{mr:>10.3f}{mp:>10.3f}")
+        d = r["decision"]
+        verdict = "ADOPT" if d["adopt"] else "KEEP SHIPPED"
+        note = "" if profile == "statement" else "  (control only, not applied)"
+        print(f"decision: {verdict}{note}")
 
 
 def write_report(report):
@@ -321,7 +391,7 @@ def write_report(report):
     lines.append("")
 
     for profile, r in report.items():
-        substrate = "python + rust" if profile == "instruction" else "javascript"
+        substrate = " + ".join(r["languages"])
         lines.append(f"## `{profile}` profile ({substrate})")
         lines.append("")
         lines.append("Row/group counts:")
@@ -378,16 +448,19 @@ def write_report(report):
         lines.append(f"| **mean** | | **{mc:.3f}** | **{mr:.3f}** | **{mp:.3f}** | | |")
         lines.append("")
 
-        if profile == "statement":
+        row_loo_folds = [o["group"] for o in r["outer"] if o["inner_method"] == "row-loo"]
+        if row_loo_folds:
             lines.append(
-                "> Both outer folds above train on a single remaining group "
-                "(`mime-types` alone, or `ms` alone -- this profile only has "
-                "two groups total), so the inner lambda selection for those "
-                "folds is the row-level leave-one-out fallback, not "
-                "group-level inner CV. Treat this profile's held-out numbers "
-                "as indicative, not well-powered: two groups is barely "
-                "enough to run leave-one-group-out at all, and the variance "
-                "of a 2-fold mean is large."
+                f"> {len(row_loo_folds)}/{len(r['outer'])} outer fold(s) above "
+                f"({', '.join(f'`{g}`' for g in row_loo_folds)}) leave a "
+                "training set with fewer than 2 groups, so their inner "
+                "lambda selection falls back to row-level leave-one-out CV "
+                "within the lone remaining training group rather than "
+                "group-level inner CV. Treat those folds' held-out numbers "
+                "as less powered than the group-level ones; with only "
+                f"{len(r['groups'])} group(s) total in this profile, the "
+                "variance of the outer mean is still larger than the "
+                "ground-truth fits' numbers in `panel.rs`."
             )
             lines.append("")
 
@@ -404,7 +477,7 @@ def write_report(report):
 
     para = []
     for profile, mc, mr, wins, total in verdict_bits:
-        substrate = "python + rust" if profile == "instruction" else "javascript"
+        substrate = " + ".join(report[profile]["languages"])
         if mr > mc:
             verb = "do beat"
         elif mr < mc:
@@ -454,13 +527,91 @@ def write_report(report):
         "functions/100 lines respectively, and every group is a different "
         "repository rather than a different function within one codebase, "
         "so held-out rho here has much higher fold-to-fold variance than "
-        "the numbers quoted in `panel.rs`'s doc comments. This report "
-        "should be read as a first behavioural calibration check, not as "
-        "grounds to replace the shipped weights on its own."
+        "the numbers quoted in `panel.rs`'s doc comments. This report is a "
+        "behavioural calibration check against a different target than the "
+        "shipped weights were fitted for (see the caveat above); the "
+        "decision below applies the repo's standing adoption rule to the "
+        "held-out numbers exactly as measured, no more and no less."
     )
     lines.append("")
 
+    write_decision(lines, report)
+
     (HERE / "REFIT.md").write_text("\n".join(lines) + "\n")
+
+
+def write_decision(lines, report):
+    """The binding call for this task: statement-weight refit. Standing
+    rule (unconditional, not a judgment call) -- adopt a profile's refit
+    weights into `panel.rs` only if they beat the shipped weights held-out
+    on a majority of leave-one-group-out folds AND on the mean rho across
+    folds. Evaluated here only for `statement` (this task's target);
+    `instruction` is reported as a control, not a candidate for adoption."""
+    lines.append("## Decision")
+    lines.append("")
+
+    r = report.get("statement")
+    if r is None:
+        lines.append("No `statement`-profile rows were available; no decision made.")
+        lines.append("")
+        return
+
+    d = r["decision"]
+    verdict = "ADOPT the refit weights" if d["adopt"] else "KEEP the shipped weights"
+    lines.append(
+        f"**`statement` profile: {verdict}.** Standing rule: adopt only if "
+        "the refit beats the shipped weights held-out on a majority of "
+        "leave-one-group-out folds *and* on the mean."
+    )
+    lines.append("")
+    lines.append(
+        f"- Majority of groups: refit wins {d['wins']}/{d['total']} "
+        f"({'>' if d['majority'] else '<='} half) -- "
+        f"{'satisfied' if d['majority'] else 'not satisfied'}."
+    )
+    lines.append(
+        f"- Mean held-out rho: refit {d['mean_refit']:.3f} vs current "
+        f"{d['mean_current']:.3f} -- "
+        f"{'satisfied' if d['beats_mean'] else 'not satisfied'}."
+    )
+    lines.append(
+        "- Both conditions are required (AND, not OR); "
+        f"{'both are satisfied' if d['adopt'] else 'at least one is not'}, "
+        f"so the decision is **{verdict}**."
+    )
+    lines.append("")
+    if d["adopt"]:
+        lines.append(
+            "`crates/vikt-core/src/panel.rs`'s `STATEMENT_WEIGHTS` and its "
+            "provenance doc comment are updated to this report's full-data "
+            "statement refit vector (fit on all statement-profile groups "
+            "above, lambda chosen the same way), with the held-out numbers "
+            "from this report quoted in place of the superseded "
+            "reader-judgement fit's numbers."
+        )
+    else:
+        lines.append(
+            "`STATEMENT_WEIGHTS` in `crates/vikt-core/src/panel.rs` is "
+            "**unchanged**. The behavioural refit does not clear the "
+            "standing bar on this data, so the shipped weights -- fitted "
+            "against blind reader-importance judgements, not mutation "
+            "kill rate -- stand."
+        )
+    lines.append("")
+
+    ir = report.get("instruction")
+    if ir is not None:
+        idd = ir["decision"]
+        lines.append(
+            f"`instruction` profile, for control only (not evaluated for "
+            f"adoption by this task): refit wins {idd['wins']}/{idd['total']} "
+            f"groups, mean rho {idd['mean_refit']:.3f} (refit) vs "
+            f"{idd['mean_current']:.3f} (current) -- "
+            f"{'would satisfy' if idd['adopt'] else 'would not satisfy'} "
+            "the same standing rule if it were being applied here. "
+            "`INSTRUCTION_WEIGHTS` is untouched regardless."
+        )
+        lines.append("")
 
 
 if __name__ == "__main__":

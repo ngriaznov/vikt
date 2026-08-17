@@ -36,7 +36,7 @@ Leave-one-group-out evaluation (Spearman rho of each score against `kill_rate`; 
 | `/tmp/corpus/rust-shlex` | 22 | 0.204 | -0.054 | 0.162 | 0.01 | logo |
 | **mean** | | **-0.028** | **-0.149** | **0.035** | | |
 
-## `statement` profile (javascript)
+## `statement` profile (javascript + python)
 
 Row/group counts:
 
@@ -44,35 +44,49 @@ Row/group counts:
 |---|---|
 | `/tmp/corpus/mime-types` | 38 |
 | `/tmp/corpus/ms` | 35 |
-| **total** | **73** |
+| `/tmp/corpus/six` | 101 |
+| `/tmp/corpus/statuses` | 35 |
+| **total** | **209** |
 
-Full-data refit (all 2 group(s) pooled): lambda = **1.0** (chosen by inner leave-one-group-out over this profile's groups, inner rho 0.307).
+Full-data refit (all 4 group(s) pooled): lambda = **1.0** (chosen by inner leave-one-group-out over this profile's groups, inner rho 0.152).
 
 | feature | current shipped weight | refit weight (full data) |
 |---|---|---|
-| `current` | +0.1386 | +0.1241 |
-| `schur` | +0.1109 | +0.1769 |
-| `pivot` | +0.0917 | +0.1437 |
-| `trophic` | +0.1559 | +0.1370 |
-| `strahler` | +0.1587 | +0.1306 |
-| `position` | +0.1800 | +0.1345 |
-| `boundary` | +0.0522 | +0.0829 |
+| `current` | +0.1386 | +0.0749 |
+| `schur` | +0.1109 | +0.1014 |
+| `pivot` | +0.0917 | +0.0653 |
+| `trophic` | +0.1559 | +0.0805 |
+| `strahler` | +0.1587 | +0.0774 |
+| `position` | +0.1800 | +0.0682 |
+| `boundary` | +0.0522 | +0.0463 |
 
 Leave-one-group-out evaluation (Spearman rho of each score against `kill_rate`; refit weights for each row are trained on the *other* group(s) in this profile only, never on the held-out group):
 
 | held-out group | n | current weights | refit weights | position alone | inner lambda | inner method |
 |---|---|---|---|---|---|---|
-| `/tmp/corpus/mime-types` | 38 | 0.080 | 0.105 | -0.051 | 1.0 | row-loo |
-| `/tmp/corpus/ms` | 35 | 0.526 | 0.374 | 0.270 | 0.3 | row-loo |
-| **mean** | | **0.303** | **0.240** | **0.110** | | |
-
-> Both outer folds above train on a single remaining group (`mime-types` alone, or `ms` alone -- this profile only has two groups total), so the inner lambda selection for those folds is the row-level leave-one-out fallback, not group-level inner CV. Treat this profile's held-out numbers as indicative, not well-powered: two groups is barely enough to run leave-one-group-out at all, and the variance of a 2-fold mean is large.
+| `/tmp/corpus/mime-types` | 38 | 0.080 | 0.084 | -0.051 | 1.0 | logo |
+| `/tmp/corpus/ms` | 35 | 0.526 | 0.503 | 0.270 | 0.3 | logo |
+| `/tmp/corpus/six` | 101 | -0.076 | -0.047 | -0.125 | 1.0 | logo |
+| `/tmp/corpus/statuses` | 35 | 0.065 | 0.024 | -0.102 | 1.0 | logo |
+| **mean** | | **0.149** | **0.141** | **-0.002** | | |
 
 ## Does the refit beat the current weights, held out?
 
-On the `instruction` profile (python + rust, 4 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho -0.149 (refit) vs -0.028 (current), refit winning on 0/4 groups. On the `statement` profile (javascript, 2 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho 0.240 (refit) vs 0.303 (current), refit winning on 1/2 groups.
+On the `instruction` profile (python + rust, 4 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho -0.149 (refit) vs -0.028 (current), refit winning on 0/4 groups. On the `statement` profile (javascript + python, 4 held-out groups), the behaviourally-refit weights do not beat the current shipped weights held out: mean Spearman rho 0.141 (refit) vs 0.149 (current), refit winning on 2/4 groups.
 
 Caveat, and it matters: `kill_rate` measures **behavioural leverage** -- whether a line, when mutated, changes something a test suite can catch. It is not the same target the shipped weights were fitted against. `INSTRUCTION_WEIGHTS` and `STATEMENT_WEIGHTS` (see `crates/vikt-core/src/panel.rs`) were ridge-fitted against a blind expert rater's per-line **reader importance** judgements (`eval/ground-truth-v3.json`, `eval/ground-truth-js-v1.json`) -- what a careful human reading the source, with no scorer output in front of them, marks as mattering. A line can carry high behavioural leverage and low reader importance (an easily-mutated boundary check nobody would call central to the function) or the reverse (a load-bearing structural line a good mutation operator rarely touches). Where this report shows the refit beating the current weights, that is evidence the panel features predict mutation-kill sensitivity better with different coefficients -- it is not evidence the current weights are wrong for the target they were actually fitted against, and it should not be read as license to hand-edit `panel.rs`. Where the refit does not beat the current weights, that says plainly: **it does not**, on this data, at this sample size.
 
-Sample sizes here are small relative to the ground-truth fits (4 groups / 103 rows for `instruction`); (2 groups / 73 rows for `statement`) against 16 functions/425 lines and 9 functions/100 lines respectively, and every group is a different repository rather than a different function within one codebase, so held-out rho here has much higher fold-to-fold variance than the numbers quoted in `panel.rs`'s doc comments. This report should be read as a first behavioural calibration check, not as grounds to replace the shipped weights on its own.
+Sample sizes here are small relative to the ground-truth fits (4 groups / 103 rows for `instruction`); (4 groups / 209 rows for `statement`) against 16 functions/425 lines and 9 functions/100 lines respectively, and every group is a different repository rather than a different function within one codebase, so held-out rho here has much higher fold-to-fold variance than the numbers quoted in `panel.rs`'s doc comments. This report is a behavioural calibration check against a different target than the shipped weights were fitted for (see the caveat above); the decision below applies the repo's standing adoption rule to the held-out numbers exactly as measured, no more and no less.
+
+## Decision
+
+**`statement` profile: KEEP the shipped weights.** Standing rule: adopt only if the refit beats the shipped weights held-out on a majority of leave-one-group-out folds *and* on the mean.
+
+- Majority of groups: refit wins 2/4 (<= half) -- not satisfied.
+- Mean held-out rho: refit 0.141 vs current 0.149 -- not satisfied.
+- Both conditions are required (AND, not OR); at least one is not, so the decision is **KEEP the shipped weights**.
+
+`STATEMENT_WEIGHTS` in `crates/vikt-core/src/panel.rs` is **unchanged**. The behavioural refit does not clear the standing bar on this data, so the shipped weights -- fitted against blind reader-importance judgements, not mutation kill rate -- stand.
+
+`instruction` profile, for control only (not evaluated for adoption by this task): refit wins 0/4 groups, mean rho -0.149 (refit) vs -0.028 (current) -- would not satisfy the same standing rule if it were being applied here. `INSTRUCTION_WEIGHTS` is untouched regardless.
 
