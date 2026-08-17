@@ -206,11 +206,15 @@ enum Cmd {
     /// Self-calibrate on a repository: mutate lines the panel scored, let the
     /// repository's own test suite kill mutants, and report whether the panel
     /// ordering agrees with the kill rates. Python, JavaScript/TypeScript,
-    /// and Rust cargo packages (a directory with Cargo.toml); a Python/JS
-    /// tree with both is calibrated in whichever scored more lines. Rust
-    /// builds every mutant first — one that does not compile is invalid, not
-    /// killed. TypeScript caveat: a type-invalid mutant is read as killed by
-    /// the repository's own toolchain, not distinguished from a test catch.
+    /// Rust cargo packages (a directory with Cargo.toml), Java, Kotlin and
+    /// Go; a Python/JS tree with both is calibrated in whichever scored more
+    /// lines, while Rust/Java/Kotlin/Go each require the tree to hold no
+    /// other calibratable language. Rust, Java, Kotlin and Go all build
+    /// every mutant first — one that does not compile is invalid, not
+    /// killed; Java and Kotlin have no default build command and require
+    /// `--build-cmd` explicitly. TypeScript caveat: a type-invalid mutant is
+    /// read as killed by the repository's own toolchain, not distinguished
+    /// from a test catch.
     Calibrate(calibrate::CalibrateArgs),
 }
 

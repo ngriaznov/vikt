@@ -25,8 +25,16 @@ pub mod ext {
     pub const TYPESCRIPT: &[&str] = &["ts", "mts", "cts", "tsx"];
     /// Rust sources.
     pub const RUST: &[&str] = &["rs"];
+    /// Java sources.
+    pub const JAVA: &[&str] = &["java"];
+    /// Kotlin sources.
+    pub const KOTLIN: &[&str] = &["kt", "kts"];
     /// JVM-language sources, lowered from source by the tree-sitter
-    /// frontend (the `.class` route stays the bytecode path).
+    /// frontend (the `.class` route stays the bytecode path). The union of
+    /// [`JAVA`] and [`KOTLIN`] — kept as its own table since `InputKind`'s
+    /// single-file dispatch doesn't need to tell them apart the way
+    /// `calibrate`'s per-language [`crate::language::Language`] registry
+    /// does.
     pub const JVM_SOURCE: &[&str] = &["java", "kt", "kts"];
     /// Go sources, lowered from source by the tree-sitter frontend - there
     /// is no bytecode/MIR primary to fall back from at all, same as
@@ -104,15 +112,18 @@ pub fn is_typescript(rel: &Path) -> bool {
         .is_some_and(|e| ext::TYPESCRIPT.contains(&e))
 }
 
-/// A language `calibrate` can mutate and score. `.class`, `.java` and `.kt`
-/// inputs are analyzable but not calibratable: no mutation engine exists
-/// for them, and the scope error names them honestly rather than claiming
-/// they were not found.
+/// A language `calibrate` can mutate and score. `.class` inputs are
+/// analyzable but not calibratable: no mutation engine exists for compiled
+/// bytecode, and the scope error names it honestly rather than claiming it
+/// was not found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
     Python,
     JavaScript,
     Rust,
+    Java,
+    Kotlin,
+    Go,
 }
 
 impl Language {
@@ -122,6 +133,9 @@ impl Language {
             Self::Python => "Python",
             Self::JavaScript => "JavaScript/TypeScript",
             Self::Rust => "Rust",
+            Self::Java => "Java",
+            Self::Kotlin => "Kotlin",
+            Self::Go => "Go",
         }
     }
 
@@ -132,6 +146,9 @@ impl Language {
             Self::Python => "python",
             Self::JavaScript => "javascript",
             Self::Rust => "rust",
+            Self::Java => "java",
+            Self::Kotlin => "kotlin",
+            Self::Go => "go",
         }
     }
 
@@ -141,6 +158,9 @@ impl Language {
             Self::Python => ext::PYTHON,
             Self::JavaScript => ext::JS,
             Self::Rust => ext::RUST,
+            Self::Java => ext::JAVA,
+            Self::Kotlin => ext::KOTLIN,
+            Self::Go => ext::GO,
         }
     }
 
@@ -148,27 +168,50 @@ impl Language {
     /// dependence-graph granularity — instruction-level for bytecode/MIR,
     /// statement-level for AST lowerings. A tree-sitter-scored run
     /// overrides this to `Statement` at the score site, where the lowering
-    /// that actually ran is known.
+    /// that actually ran is known. Java, Kotlin and Go have no primary
+    /// frontend at all — tree-sitter is their only lowering — so this is
+    /// never actually read for them; the arm exists only so the match stays
+    /// exhaustive.
     pub fn panel_profile(self) -> PanelProfile {
         match self {
             Self::Python | Self::Rust => PanelProfile::Instruction,
-            Self::JavaScript => PanelProfile::Statement,
+            Self::JavaScript | Self::Java | Self::Kotlin | Self::Go => PanelProfile::Statement,
         }
     }
 
-    /// Default total mutant budget. Rust's is smaller because every mutant
-    /// costs an incremental compile before its test run.
+    /// Default total mutant budget. Smaller for every language whose
+    /// mutants cost a build step before the suite runs (Rust, Java,
+    /// Kotlin) — Go keeps the same default despite also needing one,
+    /// since `go build`/`go vet` are fast enough that the per-mutant cost
+    /// the smaller budget exists to price in barely shows up.
     pub fn budget_default(self) -> usize {
         match self {
-            Self::Rust => 60,
-            Self::Python | Self::JavaScript => 150,
+            Self::Rust | Self::Java | Self::Kotlin => 60,
+            Self::Python | Self::JavaScript | Self::Go => 150,
         }
     }
 
     /// Whether every mutant must pass a build step before the suite runs —
-    /// textual Rust splices the compiler rejects are invalid, not killed.
+    /// a textual splice the language's compiler (or, for Go, `go vet`)
+    /// rejects is invalid, not killed.
     pub fn needs_build_step(self) -> bool {
-        matches!(self, Self::Rust)
+        matches!(self, Self::Rust | Self::Java | Self::Kotlin | Self::Go)
+    }
+
+    /// The default `--build-cmd` for a language that [`needs_build_step`],
+    /// or `None` when the flag has no safe default and must be given
+    /// explicitly — Java and Kotlin projects have no one obvious build
+    /// invocation this crate could assume (gradle, maven and a bare
+    /// `javac`/`kotlinc` call all differ per project), so calibrating them
+    /// requires `--build-cmd` outright.
+    ///
+    /// [`needs_build_step`]: Self::needs_build_step
+    pub fn default_build_cmd(self) -> Option<&'static str> {
+        match self {
+            Self::Rust => Some("cargo test --no-run"),
+            Self::Go => Some("go vet ./..."),
+            Self::Java | Self::Kotlin | Self::Python | Self::JavaScript => None,
+        }
     }
 
     /// The synthetic function name(s) that overlap the extent of a real
@@ -178,15 +221,18 @@ impl Language {
     /// which lowering produced it. Python's bytecode compiler also
     /// synthesizes `<lambda>`, `<listcomp>` and friends — anything with `<`
     /// catches them all; MIR closure/generator bodies carry brace-qualified
-    /// names (`f::{closure#0}`). Every other JS function, named or
-    /// anonymous, is a real function whose lines are its own.
+    /// names (`f::{closure#0}`). Every other JS, Java, Kotlin or Go
+    /// function, named or anonymous, is a real function whose lines are its
+    /// own — same treatment JavaScript's closures already get, and for the
+    /// same reason: `vikt-ts` gives every closure its own real extent, not
+    /// one that overlaps its enclosing function's.
     pub fn is_synthetic(self, name: &str) -> bool {
         if name == "<module>" {
             return true;
         }
         match self {
             Self::Python => name.contains('<'),
-            Self::JavaScript => false,
+            Self::JavaScript | Self::Java | Self::Kotlin | Self::Go => false,
             Self::Rust => name.contains('{'),
         }
     }
@@ -196,9 +242,12 @@ impl Language {
     /// per-language conventions — `__tests__` and `.test`/`.spec` suffixes
     /// for JavaScript, `test_*`/`*_test.py` names for Python,
     /// `benches`/`examples` directories for Rust (whose unit tests live
-    /// behind `#[cfg(test)]` and are never lowered at all).
-    // The `.test`/`.spec` suffix check is a filename convention, not a file
-    // extension, hence the case-sensitive comparison.
+    /// behind `#[cfg(test)]` and are never lowered at all), `*Test.java`/
+    /// `*Test.kt`/`*Test.kts` names for Java/Kotlin (the JVM convention;
+    /// `src/test/...` trees are already covered by the generic `test`
+    /// directory-component check), `*_test.go` for Go.
+    // The suffix checks are filename conventions, not file extensions,
+    // hence the case-sensitive comparisons.
     #[allow(clippy::case_sensitive_file_extension_comparisons)]
     pub fn is_test_path(self, rel: &Path) -> bool {
         let in_test_dir = rel.parent().is_some_and(|p| {
@@ -217,6 +266,9 @@ impl Language {
                     .is_some_and(|base| base.ends_with(".test") || base.ends_with(".spec"))
             }),
             Self::Rust => false,
+            Self::Java => name.ends_with("Test.java"),
+            Self::Kotlin => name.ends_with("Test.kt") || name.ends_with("Test.kts"),
+            Self::Go => name.ends_with("_test.go"),
         };
         in_test_dir || by_name
     }
@@ -234,10 +286,14 @@ impl Language {
         limit: usize,
         python: &str,
     ) -> Result<MutantSet, Box<dyn std::error::Error>> {
+        use vikt_core::textmut;
         Ok(match self {
             Self::Python => vikt_py::calibrate::mutants_for(file, spans, limit, python)?,
             Self::JavaScript => vikt_js::calibrate::mutants_for(file, spans, limit)?,
             Self::Rust => vikt_rs::calibrate::mutants_for(file, spans, limit)?,
+            Self::Java => textmut::mutants_for(file, spans, limit, &textmut::JAVA)?,
+            Self::Kotlin => textmut::mutants_for(file, spans, limit, &textmut::KOTLIN)?,
+            Self::Go => textmut::mutants_for(file, spans, limit, &textmut::GO)?,
         })
     }
 }
@@ -285,5 +341,69 @@ mod tests {
         }
         assert_eq!(classify("rb"), None);
         assert_eq!(classify(""), None);
+    }
+
+    /// `JAVA` and `KOTLIN` are disjoint and together equal `JVM_SOURCE` —
+    /// the split table used by `calibrate`'s registry must never drift from
+    /// the combined one `InputKind` dispatch reads.
+    #[test]
+    fn java_and_kotlin_partition_jvm_source() {
+        assert!(ext::JAVA.iter().all(|e| ext::JVM_SOURCE.contains(e)));
+        assert!(ext::KOTLIN.iter().all(|e| ext::JVM_SOURCE.contains(e)));
+        assert!(!ext::JAVA.iter().any(|e| ext::KOTLIN.contains(e)));
+        let mut union: Vec<&str> = [ext::JAVA, ext::KOTLIN].concat();
+        union.sort_unstable();
+        let mut jvm = ext::JVM_SOURCE.to_vec();
+        jvm.sort_unstable();
+        assert_eq!(union, jvm);
+    }
+
+    /// The JVM naming convention (`FooTest.java`/`FooTest.kt`) is
+    /// case-sensitive and language-specific; `src/test/...` is already
+    /// covered by the generic `test`-directory-component rule shared by
+    /// every language.
+    #[test]
+    fn java_kotlin_go_test_path_conventions() {
+        assert!(
+            Language::Java.is_test_path(Path::new("src/test/java/com/example/CheckoutTest.java"))
+        );
+        assert!(Language::Java.is_test_path(Path::new("CheckoutTest.java")));
+        assert!(!Language::Java.is_test_path(Path::new("Checkout.java")));
+        assert!(!Language::Java.is_test_path(Path::new("checkouttest.java")));
+
+        assert!(
+            Language::Kotlin.is_test_path(Path::new("src/test/kotlin/com/example/CheckoutTest.kt"))
+        );
+        assert!(Language::Kotlin.is_test_path(Path::new("CheckoutTest.kts")));
+        assert!(!Language::Kotlin.is_test_path(Path::new("Checkout.kt")));
+
+        assert!(Language::Go.is_test_path(Path::new("checkout_test.go")));
+        assert!(!Language::Go.is_test_path(Path::new("checkout.go")));
+    }
+
+    /// Java, Kotlin and Go closures keep their own scorable extent, the
+    /// same treatment JavaScript's already get — only the `<module>`
+    /// top-level wrapper is synthetic for these three.
+    #[test]
+    fn java_kotlin_go_never_treat_a_real_function_as_synthetic() {
+        for lang in [Language::Java, Language::Kotlin, Language::Go] {
+            assert!(lang.is_synthetic("<module>"));
+            assert!(!lang.is_synthetic("checkout"));
+            assert!(!lang.is_synthetic("lambda$checkout$0"));
+        }
+    }
+
+    /// Rust and Go keep a sensible `--build-cmd` default; Java and Kotlin
+    /// have none, which is what makes the flag required for them in
+    /// `calibrate`.
+    #[test]
+    fn default_build_cmd_is_none_only_for_java_and_kotlin() {
+        assert_eq!(
+            Language::Rust.default_build_cmd(),
+            Some("cargo test --no-run")
+        );
+        assert_eq!(Language::Go.default_build_cmd(), Some("go vet ./..."));
+        assert_eq!(Language::Java.default_build_cmd(), None);
+        assert_eq!(Language::Kotlin.default_build_cmd(), None);
     }
 }

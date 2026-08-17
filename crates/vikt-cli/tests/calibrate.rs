@@ -306,12 +306,39 @@ fn copy_keeps_dot_files_and_follows_symlinks() {
 
 /// A tree with sources for a frontend calibrate does not support at all gets
 /// the honest scope error, not a generic "nothing found". No interpreter or
-/// oxc parse involved: the check runs on file extensions alone, before
-/// any engine touches the tree. JVM sources are the one frontend family
-/// calibrate has never covered.
+/// oxc parse involved: the check runs on file extensions alone, before any
+/// engine touches the tree. `.class` bytecode is the one frontend family
+/// `analyze` covers that `calibrate` never can (no source to mutate).
 #[test]
 fn unsupported_frontend_trees_are_rejected() {
     let dir = std::env::temp_dir().join(format!("vikt-calibrate-scope-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir is writable");
+    std::fs::write(dir.join("App.class"), [0xCAu8, 0xFE, 0xBA, 0xBE]).expect("temp file");
+    let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
+        .args(["calibrate"])
+        .arg(&dir)
+        .args(["--test-cmd", "true"])
+        .output()
+        .expect("running the vikt binary");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("contains none of them"),
+        "stderr:\n{stderr}"
+    );
+}
+
+/// Java (and Kotlin) have no sensible default `--build-cmd` — gradle, maven
+/// and a bare `javac`/`kotlinc` invocation all differ per project — so
+/// omitting the flag for a Java tree is a clear, actionable error rather
+/// than a guess, and it fires before any mutant is even generated.
+#[test]
+fn java_without_build_cmd_is_a_clear_error() {
+    let dir = std::env::temp_dir().join(format!(
+        "vikt-calibrate-java-nobuild-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("temp dir is writable");
     std::fs::write(dir.join("App.java"), "class App {}\n").expect("temp file");
     let out = Command::new(env!("CARGO_BIN_EXE_vikt"))
@@ -323,7 +350,9 @@ fn unsupported_frontend_trees_are_rejected() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("contains neither"), "stderr:\n{stderr}");
+    assert!(stderr.contains("--build-cmd"), "stderr:\n{stderr}");
+    assert!(stderr.contains("javac"), "stderr:\n{stderr}");
+    assert!(stderr.contains("gradle"), "stderr:\n{stderr}");
 }
 
 /// Loose `.rs` files without a `Cargo.toml` cannot run a suite, and the

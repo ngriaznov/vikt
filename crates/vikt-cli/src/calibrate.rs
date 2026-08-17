@@ -13,13 +13,16 @@
 //! cannot beat "earlier is more important" on this repository has nothing to
 //! offer it.
 //!
-//! Python, JavaScript/TypeScript, and Rust cargo packages: mutation needs a
-//! language-specific rewrite engine and a test-command convention — see
-//! [`Language`] for how a tree picks one. Rust runs a build step before the
-//! suite for every mutant, because its engine splices text and a splice can
+//! Python, JavaScript/TypeScript, Rust cargo packages, Java, Kotlin and Go:
+//! mutation needs a language-specific rewrite engine and a test-command
+//! convention — see [`Language`] for how a tree picks one. Rust, Java,
+//! Kotlin and Go all run a build step before the suite for every mutant,
+//! because their engines splice text (Rust's own splicer, or
+//! [`vikt_core::textmut`] shared by the other three) and a splice can
 //! propose an edit the language rejects: a mutant that does not compile is
 //! *invalid*, discarded from the kill rate entirely, and each mutant costs a
-//! compile, which the run says up front.
+//! build, which the run says up front. Java and Kotlin have no sensible
+//! default build command at all — `--build-cmd` is required for either.
 //! TypeScript carries one extra caveat: a mutant that is syntactically valid
 //! JavaScript but violates TypeScript's type system is read as *killed* by
 //! whatever runs the repository's own type check, indistinguishable from a
@@ -54,18 +57,13 @@ const MAX_INSTRUCTIONS: usize = 4096;
 /// code should not make calibration copy them.
 const MAX_COPY_BYTES: u64 = 8 * 1024 * 1024;
 
-/// Extensions calibrate cannot mutate — analyzable inputs without a
-/// mutation engine — for an honest "not supported" error instead of a
-/// puzzling "no sources found". Derived from the registry's tables so the
-/// two can never disagree about what exists. Go is analyzable (`vikt-ts`)
-/// but not calibratable, same reasoning as `.class`/`.java`/`.kt`: no
-/// mutation engine exists for it, and building a one-off textual splicer
-/// just for Go rather than the general-purpose engine a future stage adds
-/// would be its own maintenance burden.
+/// Extensions calibrate cannot mutate at all — analyzable but with no
+/// mutation engine behind them, for an honest "not supported" error instead
+/// of a puzzling "no sources found". Only compiled `.class` bytecode
+/// qualifies now: Python, JavaScript/TypeScript, Rust, Java, Kotlin and Go
+/// sources all have one.
 fn uncalibratable(ext: &str) -> bool {
     language::ext::CLASS.contains(&ext)
-        || language::ext::JVM_SOURCE.contains(&ext)
-        || language::ext::GO.contains(&ext)
 }
 
 /// How wide a lens the panel score and positional null use when paired
@@ -101,10 +99,13 @@ enum Scope {
 
 #[derive(Debug, clap::Args)]
 pub struct CalibrateArgs {
-    /// Directory of Python and/or JavaScript/TypeScript sources. A tree with
-    /// files for another frontend entirely is rejected with an error. A tree
-    /// with both Python and JavaScript/TypeScript sources is calibrated in
-    /// whichever language scored more lines; the run says which, and why.
+    /// Directory of Python, JavaScript/TypeScript, Rust (a cargo package),
+    /// Java, Kotlin or Go sources. A tree with files for another frontend
+    /// entirely is rejected with an error. A tree with both Python and
+    /// JavaScript/TypeScript sources is calibrated in whichever language
+    /// scored more lines, the run says which and why; a tree mixing Rust,
+    /// Java, Kotlin or Go with any other calibratable language is rejected
+    /// instead — narrow `--path` to target one.
     ///
     /// TypeScript caveat: a mutant that is syntactically valid JavaScript
     /// but fails TypeScript's type check is read as *killed* by whatever
@@ -119,7 +120,9 @@ pub struct CalibrateArgs {
     /// /C` on Windows) from the root of a temporary copy of the tree. Must pass on the unmutated
     /// tree. For Python, typically a `python3 -m unittest`/`pytest`
     /// invocation; for JavaScript/TypeScript, typically `node --test` or
-    /// `npm test`.
+    /// `npm test`; for Java/Kotlin/Go, whatever runs the already-built
+    /// classes/binary from `--build-cmd`, e.g. `java -cp out Test` or
+    /// `go test ./...`.
     #[arg(long, value_name = "COMMAND")]
     pub test_cmd: String,
 
@@ -145,12 +148,17 @@ pub struct CalibrateArgs {
     #[arg(long)]
     pub gate: bool,
 
-    /// Build command run before the test command for every Rust mutant,
-    /// from the copy root. Non-zero exit marks the mutant invalid — a
-    /// textual splice the language rejected — which is discarded, not
-    /// killed. Unused outside Rust.
-    #[arg(long, value_name = "COMMAND", default_value = "cargo test --no-run")]
-    pub build_cmd: String,
+    /// Build command run before the test command for every mutant of a
+    /// language that needs one (Rust, Java, Kotlin, Go), from the copy
+    /// root. Non-zero exit marks the mutant invalid — a textual splice the
+    /// language rejected — which is discarded, not killed. Defaults to
+    /// `cargo test --no-run` for Rust and `go vet ./...` for Go; Java and
+    /// Kotlin have no default at all (gradle, maven and a bare
+    /// `javac`/`kotlinc` invocation all differ per project) and calibrating
+    /// either is an error until this is given explicitly. Unused for Python
+    /// and JavaScript/TypeScript.
+    #[arg(long, value_name = "COMMAND")]
+    pub build_cmd: Option<String>,
 
     /// Write one JSON line per mutated line that carries a panel score:
     /// the seven per-line panel features (measurement/audit surface of
@@ -250,28 +258,7 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
     }
 
     let scan = scan_tree(&args.path)?;
-    let rust = args.path.join("Cargo.toml").is_file();
-    if !rust && !scan.rs.is_empty() {
-        return Err(format!(
-            "Rust calibration targets a cargo package, and {} has .rs sources but no Cargo.toml — point --path at the package root",
-            args.path.display()
-        )
-        .into());
-    }
-    if !rust && scan.py.is_empty() && scan.js.is_empty() {
-        return Err(if scan.other_frontend {
-            format!(
-                "calibration supports Python and JavaScript/TypeScript sources only, and {} contains neither",
-                args.path.display()
-            )
-        } else {
-            format!(
-                "no Python or JavaScript/TypeScript sources found under {}",
-                args.path.display()
-            )
-        }
-        .into());
-    }
+    let target = resolve_target(&args.path, &scan)?;
 
     // Everything from here on happens in the copy. The input tree is never
     // opened for writing; the integration tests hold this to byte-identity.
@@ -299,26 +286,37 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     );
 
-    let budget = args.budget.unwrap_or_else(|| {
-        if rust {
-            Language::Rust
-        } else {
-            Language::Python
-        }
-        .budget_default()
+    let budget = args.budget.unwrap_or_else(|| match target {
+        Target::Rust => Language::Rust.budget_default(),
+        Target::Single(l) => l.budget_default(),
+        // Python and JavaScript/TypeScript share the same default either
+        // way, so the eventual majority-vote winner never changes this.
+        Target::PyJs => Language::Python.budget_default(),
     });
     let timeout = Duration::from_secs(args.timeout_secs);
-    if rust {
+
+    // The build-step language, resolved before any mutant exists so a
+    // missing or failing `--build-cmd` is caught up front rather than after
+    // paying for a whole scoring pass. `None` for Python/JavaScript, which
+    // need no build step at all.
+    let build_step_lang = match target {
+        Target::Rust => Some(Language::Rust),
+        Target::Single(l) => Some(l),
+        Target::PyJs => None,
+    };
+    let build_cmd = build_step_lang
+        .map(|l| resolve_build_cmd(l, args.build_cmd.as_deref()))
+        .transpose()?;
+    if let (Some(l), Some(cmd)) = (build_step_lang, &build_cmd) {
         println!(
-            "calibrate: Rust mutants compile before they run (`{}` per mutant) — minutes, not seconds",
-            args.build_cmd
+            "calibrate: {} mutants compile before they run (`{cmd}` per mutant) — minutes, not seconds",
+            l.label()
         );
-        match run_test(&args.build_cmd, &copy.root, timeout)? {
+        match run_test(cmd, &copy.root, timeout)? {
             TestOutcome::Pass => {}
             TestOutcome::Fail => {
                 return Err(format!(
-                    "the build command fails on the unmutated tree; fix `{}` (run from the tree root) before calibrating",
-                    args.build_cmd
+                    "the build command fails on the unmutated tree; fix `{cmd}` (run from the tree root) before calibrating"
                 )
                 .into());
             }
@@ -349,10 +347,23 @@ pub fn run(args: &CalibrateArgs) -> Result<ExitCode, Box<dyn Error>> {
         }
     }
 
-    let (lang, (mut scored, file_scores, generator, profile)) = if rust {
-        (Language::Rust, score_crate(&copy.root, args.lowering)?)
-    } else {
-        score_by_majority(&copy.root, &scan, &args.python, args.lowering)
+    let (lang, (mut scored, file_scores, generator, profile)) = match target {
+        Target::Rust => (Language::Rust, score_crate(&copy.root, args.lowering)?),
+        Target::Single(l) => {
+            let files: &[PathBuf] = match l {
+                Language::Java => &scan.java,
+                Language::Kotlin => &scan.kotlin,
+                Language::Go => &scan.go,
+                Language::Python | Language::JavaScript | Language::Rust => {
+                    unreachable!("resolve_target only ever puts Java/Kotlin/Go in Target::Single")
+                }
+            };
+            (
+                l,
+                score_tree(&copy.root, files, l, &args.python, args.lowering),
+            )
+        }
+        Target::PyJs => score_by_majority(&copy.root, &scan, &args.python, args.lowering),
     };
     println!(
         "calibrate: scored via {generator} ({} profile)",
@@ -438,7 +449,14 @@ repository's own type check is read as killed, indistinguishable from one an act
         );
     }
 
-    let tally = execute_mutants(&copy.root, &mutants, args, lang, timeout)?;
+    let tally = execute_mutants(
+        &copy.root,
+        &mutants,
+        args,
+        build_cmd.as_deref(),
+        lang,
+        timeout,
+    )?;
     println!(
         "calibrate: {} mutants executed: {} killed, {} survived, {} timed out (timeouts count as killed)",
         tally.executed(),
@@ -483,6 +501,101 @@ fn gate_code(v: Verdict) -> u8 {
         Verdict::InsufficientData => 2,
         Verdict::Uncalibrated => 3,
     }
+}
+
+/// Which language family a scanned tree resolves to, decided once from
+/// [`TreeScan`] (plus a `Cargo.toml` check for Rust) before anything is
+/// copied, built or scored. Rust stays its own case — a whole cargo package
+/// lowers as one unit, never file-by-file — and Java, Kotlin and Go are each
+/// their own single-language family: unlike Python/JavaScript's
+/// [`PyJs`](Target::PyJs) majority vote, mixing one of them with anything
+/// else calibratable is rejected rather than guessed at, since (unlike
+/// Python/JS) every one of them also needs a resolved build command before
+/// scoring can even start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Rust,
+    /// Java, Kotlin or Go — the only sources of a calibratable language
+    /// found in the tree.
+    Single(Language),
+    /// Python and/or JavaScript/TypeScript, resolved to one of the two by
+    /// [`score_by_majority`] once both are scored.
+    PyJs,
+}
+
+/// Resolves [`Target`] from a scan, or explains why none applies. Rust is
+/// checked first and structurally (a `Cargo.toml` alongside any `.rs`
+/// files), exactly as before this module supported anything else; every
+/// other family is decided purely from which of `scan`'s file lists are
+/// non-empty.
+fn resolve_target(path: &Path, scan: &TreeScan) -> Result<Target, Box<dyn Error>> {
+    let rust = path.join("Cargo.toml").is_file();
+    if !rust && !scan.rs.is_empty() {
+        return Err(format!(
+            "Rust calibration targets a cargo package, and {} has .rs sources but no Cargo.toml — point --path at the package root",
+            path.display()
+        )
+        .into());
+    }
+    if rust {
+        return Ok(Target::Rust);
+    }
+    let families = [
+        (Language::Java, !scan.java.is_empty()),
+        (Language::Kotlin, !scan.kotlin.is_empty()),
+        (Language::Go, !scan.go.is_empty()),
+        (Language::Python, !scan.py.is_empty()),
+        (Language::JavaScript, !scan.js.is_empty()),
+    ];
+    let present: Vec<Language> = families
+        .into_iter()
+        .filter_map(|(l, found)| found.then_some(l))
+        .collect();
+    match present.as_slice() {
+        [] => Err(if scan.other_frontend {
+            format!(
+                "calibration supports Python, JavaScript/TypeScript, Rust, Java, Kotlin and Go sources only, and {} contains none of them",
+                path.display()
+            )
+        } else {
+            format!("no calibratable sources found under {}", path.display())
+        }
+        .into()),
+        [Language::Python | Language::JavaScript] | [Language::Python, Language::JavaScript] => {
+            Ok(Target::PyJs)
+        }
+        [only] => Ok(Target::Single(*only)),
+        _ => Err(format!(
+            "{} mixes calibratable languages ({}) — narrow --path to target one",
+            path.display(),
+            present
+                .iter()
+                .map(|l| l.label())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into()),
+    }
+}
+
+/// Resolves `--build-cmd` for a language that
+/// [`needs_build_step`](Language::needs_build_step): the explicit flag when
+/// given, else the language's own default. Java and Kotlin have none, so
+/// omitting the flag for either is an error, not a guess — named with
+/// concrete examples so the fix is obvious.
+fn resolve_build_cmd(lang: Language, explicit: Option<&str>) -> Result<String, Box<dyn Error>> {
+    if let Some(cmd) = explicit {
+        return Ok(cmd.to_owned());
+    }
+    lang.default_build_cmd().map(str::to_owned).ok_or_else(|| {
+        format!(
+            "{} calibration compiles every mutant before it runs, and there is no sensible \
+default build command for it — pass --build-cmd explicitly, e.g. `javac -d out $(find src \
+-name '*.java')` for a plain javac project or `gradle testClasses` for a gradle one",
+            lang.label()
+        )
+        .into()
+    })
 }
 
 /// Scores a mixed (or single-language) Python/JavaScript tree and picks the
@@ -531,10 +644,15 @@ fn score_by_majority(
 /// well on identical mutants (`eval/calibration/ast-fallback-comparison.md`)
 /// and needs no interpreter for scoring (mutation still runs through
 /// `python3` either way). JavaScript has no primary/fallback split at all -
-/// `vikt-js`'s oxc engine is the only lowering it has ever had.
+/// `vikt-js`'s oxc engine is the only lowering it has ever had. Java,
+/// Kotlin and Go are the same story as JavaScript — tree-sitter is the only
+/// lowering either has ever had, so `--lowering` never changes anything for
+/// them (mirroring `lowering::lower_ts_source`'s "new capability, not a
+/// fallback with a choice to make").
 fn use_tree_sitter(lang: Language, lowering: Lowering) -> bool {
     match (lang, lowering) {
-        (Language::Python, Lowering::Auto | Lowering::Ast) => true,
+        (Language::Python, Lowering::Auto | Lowering::Ast)
+        | (Language::Java | Language::Kotlin | Language::Go, _) => true,
         (Language::JavaScript, _) | (Language::Python, Lowering::Primary) => false,
         // Rust lowers whole packages, not files — see `score_crate`, which
         // makes this decision for itself against `vikt_rs::lower_crate`'s
@@ -566,6 +684,9 @@ fn score_tree(
         (Language::Python, true) => "vikt-ts/tree-sitter-python",
         (Language::Python, false) => "vikt-py/dis",
         (Language::JavaScript, _) => "vikt-js/oxc",
+        (Language::Java, _) => "vikt-ts/tree-sitter-java",
+        (Language::Kotlin, _) => "vikt-ts/tree-sitter-kotlin",
+        (Language::Go, _) => "vikt-ts/tree-sitter-go",
         (Language::Rust, _) => unreachable!("score_tree is never called for Rust"),
     };
     let mut scored = Vec::new();
@@ -593,6 +714,15 @@ fn score_tree(
                     continue;
                 }
             },
+            (Language::Java | Language::Kotlin | Language::Go, _) => {
+                match vikt_ts::lower_file(&root.join(rel)) {
+                    Ok(l) => l.functions,
+                    Err(e) => {
+                        eprintln!("calibrate: skipping {}: {e}", rel.display());
+                        continue;
+                    }
+                }
+            }
             (Language::Rust, _) => unreachable!("score_tree is never called for Rust"),
         };
         score_functions(
@@ -868,8 +998,9 @@ struct Tally {
     killed: usize,
     survived: usize,
     timeouts: usize,
-    /// Rust only: mutants whose build step failed — textual splices the
-    /// language rejected. Neither killed nor survived; absent from
+    /// Only nonzero for a language with a build step (Rust, Java, Kotlin,
+    /// Go): mutants whose build failed — textual splices the language (or,
+    /// for Go, `go vet`) rejected. Neither killed nor survived; absent from
     /// `per_line` so no kill rate ever sees them.
     invalid_compile: usize,
     /// (file, line) -> (kills, mutants).
@@ -885,11 +1016,15 @@ impl Tally {
 /// Runs every mutant: write it over the copy, run the suite, restore the
 /// copy. Killed = the suite noticed (non-zero exit or hang). The original
 /// bytes are restored before any error propagates, so a failed run never
-/// leaves the copy mutated.
+/// leaves the copy mutated. `build_cmd` is the already-resolved command
+/// (`--build-cmd` or the language's own default) — `None` only when `lang`
+/// needs no build step at all, since [`resolve_build_cmd`] has already
+/// turned a missing-and-required default into an error before this runs.
 fn execute_mutants(
     root: &Path,
     mutants: &[FileMutant],
     args: &CalibrateArgs,
+    build_cmd: Option<&str>,
     lang: Language,
     timeout: Duration,
 ) -> Result<Tally, Box<dyn Error>> {
@@ -903,12 +1038,16 @@ fn execute_mutants(
     for (i, (file, mutant)) in mutants.iter().enumerate() {
         let abs = root.join(file);
         std::fs::write(&abs, mutant.source.as_bytes())?;
-        // Rust: build first. A splice the compiler rejects is an invalid
-        // mutant, not a kill — and a build that hangs is treated the same
-        // way, since nothing behavioural was ever measured. The copy's
-        // target dir persists across mutants, so each build is incremental.
+        // A build step: a splice the compiler (or `go vet`) rejects is an
+        // invalid mutant, not a kill — and a build that hangs is treated
+        // the same way, since nothing behavioural was ever measured. The
+        // copy's build output persists across mutants, so each build is
+        // incremental.
         if lang.needs_build_step() {
-            let build = run_test(&args.build_cmd, root, timeout);
+            let cmd = build_cmd.expect(
+                "invariant: needs_build_step() true implies run() resolved a build_cmd or errored",
+            );
+            let build = run_test(cmd, root, timeout);
             match build {
                 Ok(TestOutcome::Pass) => {}
                 Ok(TestOutcome::Fail | TestOutcome::Timeout) => {
@@ -1280,6 +1419,9 @@ struct TreeScan {
     py: Vec<PathBuf>,
     js: Vec<PathBuf>,
     rs: Vec<PathBuf>,
+    java: Vec<PathBuf>,
+    kotlin: Vec<PathBuf>,
+    go: Vec<PathBuf>,
     /// `node_modules` directories found anywhere in the tree, relative to
     /// the root. Never descended into for scoring or mutation, but staged
     /// into the copy (see [`TempTree::create`]) since a `node --test`/`npm
@@ -1295,6 +1437,9 @@ fn scan_tree(root: &Path) -> std::io::Result<TreeScan> {
         py: Vec::new(),
         js: Vec::new(),
         rs: Vec::new(),
+        java: Vec::new(),
+        kotlin: Vec::new(),
+        go: Vec::new(),
         node_modules: Vec::new(),
         other_frontend: false,
         skipped_large: 0,
@@ -1305,6 +1450,9 @@ fn scan_tree(root: &Path) -> std::io::Result<TreeScan> {
     scan.py.sort();
     scan.js.sort();
     scan.rs.sort();
+    scan.java.sort();
+    scan.kotlin.sort();
+    scan.go.sort();
     scan.node_modules.sort();
     Ok(scan)
 }
@@ -1384,6 +1532,12 @@ fn walk(
                 scan.js.push(rel.clone());
             } else if Language::Rust.extensions().contains(&ext) {
                 scan.rs.push(rel.clone());
+            } else if Language::Java.extensions().contains(&ext) {
+                scan.java.push(rel.clone());
+            } else if Language::Kotlin.extensions().contains(&ext) {
+                scan.kotlin.push(rel.clone());
+            } else if Language::Go.extensions().contains(&ext) {
+                scan.go.push(rel.clone());
             }
             scan.files.push(rel);
         }

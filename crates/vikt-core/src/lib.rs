@@ -96,6 +96,7 @@ pub mod pivot;
 pub mod sarif;
 pub mod schur;
 pub mod strahler;
+pub mod textmut;
 pub mod trophic;
 
 pub use artifact::{Sidecar, SpanRecord};
