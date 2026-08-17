@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/benjaminp/six.git",
+  "commit": "c8e394065cd541a16c040515dc0afb85cf22a7c3",
+  "language": "python",
+  "test_cmd": "python3 -m pytest test_six.py -q",
+  "mutants_executed": 150,
+  "invalid": 0,
+  "panel_rho": -0.076,
+  "null_rho": 0.281,
+  "verdict": "uncalibrated — panel rho -0.076 does not beat the positional null (0.281) on this tree"
+}
