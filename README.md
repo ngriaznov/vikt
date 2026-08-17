@@ -309,7 +309,7 @@ Implement one function: substrate → `Vec<FunctionIr>`.
 | Python | CPython bytecode via `dis` | PEP 626 `co_lines()`, exact | **working** |
 | JS/TS | oxc semantic-resolved AST + constructed CFG | AST spans, exact | **working** — see `vikt-js` |
 | Rust | MIR via `rustc_public`, through a nightly-pinned helper | MIR spans, macro expansions dropped as foreign | **working** — see below |
-| Go | tree-sitter AST (`vikt-ts`) | AST spans, exact | **working** — analyzable, not yet calibratable |
+| Go | tree-sitter AST (`vikt-ts`) | AST spans, exact | **working** — analyzable and calibratable |
 | C/C++/Swift | LLVM IR `DILocation` | debug info | not attempted |
 
 Rust analysis needs one extra build step: `rustc_public` is nightly-only, so
@@ -468,6 +468,9 @@ is more important" on a tree has nothing to offer it.
 vikt calibrate path/to/repo --test-cmd "python3 -m unittest"          # Python
 vikt calibrate path/to/app  --test-cmd "node --test"                  # JavaScript/TypeScript
 vikt calibrate path/to/pkg  --test-cmd "cargo test"                   # Rust (a cargo package)
+vikt calibrate path/to/repo --test-cmd "mvn test" --build-cmd "javac ..."   # Java
+vikt calibrate path/to/repo --test-cmd "gradle test" --build-cmd "kotlinc ..." # Kotlin
+vikt calibrate path/to/repo --test-cmd "go test ./..."                # Go (build step is `go vet ./...`)
 vikt calibrate path/to/repo --test-cmd "..." --scope repo             # cross-file call graph, not just one file
 ```
 
@@ -485,17 +488,24 @@ Per-language mechanics: Python mutants are AST round-trips; JavaScript and
 TypeScript mutants are byte-span splices re-parsed with oxc before use
 (`node_modules` is symlinked into the copy, never scored or mutated;
 TypeScript caveat — a type-invalid mutant is read as killed by the
-repository's own toolchain, indistinguishable from a test catch); Rust
-targets a cargo package and builds every mutant before running the suite
-(default `cargo test --no-run`, `--build-cmd` to change) — a splice the
-compiler rejects is *invalid* and excluded from every rate, not a kill,
-and because each mutant costs a compile the Rust budget defaults to 60.
+repository's own toolchain, indistinguishable from a test catch); Rust,
+Java, Kotlin and Go all build every mutant before running the suite — a
+splice the compiler (or, for Go, `go vet`) rejects is *invalid* and
+excluded from every rate, not a kill. Rust targets a cargo package
+(default `cargo test --no-run`, `--build-cmd` to change) and, because each
+mutant costs a compile, defaults its budget to 60, same as Java and
+Kotlin. Java, Kotlin and Go score through the same `vikt-ts` tree-sitter
+lowering `vikt` itself uses to analyze them, and mutate through a shared
+byte-span textual splicer (masking string/char literals and comments,
+never touching them) rather than a language-specific AST round-trip; Java
+and Kotlin have no default build command safe to assume across
+gradle/maven/bare-compiler projects, so `--build-cmd` is required for
+them, while Go's defaults to `go vet ./...`.
 
 Limits: the mutant budget is capped (default 150 over the 12 largest scored
 functions, `--budget` and `--sample` to change), and hitting the cap is
 reported, never silent; the suite must pass on the unmutated copy before
-anything is mutated — a failing baseline aborts the run; JVM sources are
-not yet calibratable.
+anything is mutated — a failing baseline aborts the run.
 
 `--emit-dataset <path>` additionally writes one JSON line per mutated,
 panel-scored line — the seven per-line panel features, the panel score, and

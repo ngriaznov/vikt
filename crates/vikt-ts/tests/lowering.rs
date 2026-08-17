@@ -2201,6 +2201,57 @@ fn go_extracts_free_and_selector_call_targets() {
     );
 }
 
+const GO_MULTI_TARGET_ASSIGN: &str = r"
+type Box struct {
+	Val int
+}
+
+func pair() (int, int) {
+	return 1, 2
+}
+
+func spread(b *Box) int {
+	a, b.Val = pair()
+	return a + b.Val
+}
+";
+
+#[test]
+fn go_multi_target_assign_treats_a_member_target_as_a_use_not_a_def() {
+    // `a, b.Val = pair()`: `a` is a fresh def, but `b` (the receiver of the
+    // member-access target `b.Val`) is the already-declared parameter being
+    // read through, not reassigned - it must show up as a use.
+    let module = lower_source(Language::Go, GO_MULTI_TARGET_ASSIGN, "spread.go").expect("lowers");
+    let f = function(&module, "spread");
+    f.validate().expect("valid graph");
+
+    let param_b = f
+        .nodes
+        .iter()
+        .find(|n| n.label == "<params>")
+        .and_then(|n| n.defs.last().copied())
+        .expect("b param def");
+
+    let assign = f
+        .nodes
+        .iter()
+        .find(|n| n.label.starts_with("a, b.Val ="))
+        .expect("the multi-target assignment node");
+    assert!(
+        assign.uses.contains(&param_b),
+        "b must be a use of the already-declared parameter, not folded into defs: {assign:?}"
+    );
+    assert!(
+        !assign.defs.contains(&param_b),
+        "b must never be recorded as reassigned by this statement: {assign:?}"
+    );
+    assert_eq!(
+        assign.defs.len(),
+        1,
+        "only `a` is a real def of this multi-target assignment: {assign:?}"
+    );
+}
+
 #[test]
 fn go_lowering_is_deterministic() {
     let a = lower_source(Language::Go, GO_LOOP, "sum.go").expect("lowers");

@@ -220,20 +220,31 @@ impl Language {
     /// exactly that name for the synthetic top-level wrapper, regardless of
     /// which lowering produced it. Python's bytecode compiler also
     /// synthesizes `<lambda>`, `<listcomp>` and friends — anything with `<`
-    /// catches them all; MIR closure/generator bodies carry brace-qualified
-    /// names (`f::{closure#0}`). Every other JS, Java, Kotlin or Go
-    /// function, named or anonymous, is a real function whose lines are its
-    /// own — same treatment JavaScript's closures already get, and for the
-    /// same reason: `vikt-ts` gives every closure its own real extent, not
-    /// one that overlaps its enclosing function's.
-    pub fn is_synthetic(self, name: &str) -> bool {
+    /// catches them all. Every JS, Java, Kotlin or Go function, named or
+    /// anonymous, is a real function whose lines are its own — `vikt-ts`
+    /// gives every closure its own real extent, not one that overlaps its
+    /// enclosing function's.
+    ///
+    /// Rust is the one language that reaches this from two different
+    /// lowerings sharing one brace-qualified closure name format
+    /// (`f::{closure#0}`, `grammar.rs`'s `closure_name_format` and
+    /// `vikt-rs`'s MIR path both produce it): MIR's closure body really
+    /// does overlap the enclosing function's own reported line, so it stays
+    /// synthetic there, but `vikt-ts`'s tree-sitter fallback gives the same
+    /// name its own non-overlapping extent exactly like Java/Kotlin/Go —
+    /// treating it as synthetic there would silently drop every Rust
+    /// closure's lines from a `--lowering ast` (or MIR-missing `auto`)
+    /// calibrate run. `via_ts` disambiguates the two; every other language
+    /// here has only ever had one lowering reach `calibrate` and ignores
+    /// it.
+    pub fn is_synthetic(self, name: &str, via_ts: bool) -> bool {
         if name == "<module>" {
             return true;
         }
         match self {
             Self::Python => name.contains('<'),
             Self::JavaScript | Self::Java | Self::Kotlin | Self::Go => false,
-            Self::Rust => name.contains('{'),
+            Self::Rust => !via_ts && name.contains('{'),
         }
     }
 
@@ -383,14 +394,31 @@ mod tests {
 
     /// Java, Kotlin and Go closures keep their own scorable extent, the
     /// same treatment JavaScript's already get — only the `<module>`
-    /// top-level wrapper is synthetic for these three.
+    /// top-level wrapper is synthetic for these three. `via_ts` is
+    /// meaningless for them (only Rust reads it) so both values must agree.
     #[test]
     fn java_kotlin_go_never_treat_a_real_function_as_synthetic() {
         for lang in [Language::Java, Language::Kotlin, Language::Go] {
-            assert!(lang.is_synthetic("<module>"));
-            assert!(!lang.is_synthetic("checkout"));
-            assert!(!lang.is_synthetic("lambda$checkout$0"));
+            for via_ts in [false, true] {
+                assert!(lang.is_synthetic("<module>", via_ts));
+                assert!(!lang.is_synthetic("checkout", via_ts));
+                assert!(!lang.is_synthetic("lambda$checkout$0", via_ts));
+            }
         }
+    }
+
+    /// Rust is the one language `is_synthetic` treats differently by
+    /// lowering: the MIR primary's `f::{closure#0}` really does overlap the
+    /// enclosing function's own reported line, so it stays synthetic
+    /// (`via_ts: false`); `vikt-ts`'s tree-sitter fallback gives the exact
+    /// same name its own non-overlapping extent, the Java/Kotlin/Go
+    /// treatment, so it must not be (`via_ts: true`) — see the doc comment
+    /// on `is_synthetic`.
+    #[test]
+    fn rust_closure_synthetic_only_under_the_mir_primary() {
+        assert!(Language::Rust.is_synthetic("outer::{closure#0}", false));
+        assert!(!Language::Rust.is_synthetic("outer::{closure#0}", true));
+        assert!(Language::Rust.is_synthetic("<module>", true));
     }
 
     /// Rust and Go keep a sensible `--build-cmd` default; Java and Kotlin

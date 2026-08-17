@@ -340,12 +340,14 @@ fn field_or_last<'t>(node: Node<'t>, field: &str) -> Option<Node<'t>> {
 /// (`c.total = ..` parses as `left: expression_list { selector_expression
 /// }`), so the member-access check in `lower_assign` has to see through
 /// that one-element wrapper to still classify a field write through a
-/// receiver as a `StateWrite`. Multi-target assignment (`a, b = f()`) is
-/// left alone - `is_member` stays `false` for it even when one of several
-/// targets happens to be a member access, a deliberate simplification:
-/// state-write detection only ever meant a single simple target. A no-op
-/// for every other language, whose `assign_left_field` is never itself a
-/// wrapper around the real target.
+/// receiver as a `StateWrite`. Called once more per-target on a multi-target
+/// assignment's (`a, obj.Field = f()`) `left` (see `lower_assign`): the
+/// whole `left` never becomes a single `StateWrite` for one of several
+/// targets, a deliberate simplification (state-write detection only ever
+/// meant a single simple target), but each target is still classified on
+/// its own so a member target's base object lands in `uses`, not `defs`. A
+/// no-op for every other language, whose `assign_left_field` is never
+/// itself a wrapper around the real target.
 fn is_member_target(table: &GrammarTable, node: Node<'_>) -> bool {
     if table.member_access_kinds.contains(&node.kind()) {
         return true;
@@ -1338,7 +1340,26 @@ impl<'t> FnCtx<'t> {
             )
         } else {
             let mut defs = Vec::new();
-            self.scan_defs(left, self.table.assign_declares, &mut defs);
+            let mut cursor = left.walk();
+            let targets: Vec<Node<'t>> = left.named_children(&mut cursor).collect();
+            if targets.len() > 1 {
+                // A multi-target assignment (`a, obj.Field = f()`): `left`
+                // as a whole isn't a member target (`is_member_target`'s
+                // "single simple target" simplification, see its docs), but
+                // each target still needs its own classification - a
+                // member-access target's base object is a use exactly like
+                // the single-target case above, never a def, or `obj` would
+                // be misrecorded as reassigned on this line.
+                for target in targets {
+                    if is_member_target(self.table, target) {
+                        self.scan_uses(target, &mut uses);
+                    } else {
+                        self.scan_defs(target, self.table.assign_declares, &mut defs);
+                    }
+                }
+            } else {
+                self.scan_defs(left, self.table.assign_declares, &mut defs);
+            }
             if is_compound {
                 for &d in &defs {
                     if !uses.contains(&d) {

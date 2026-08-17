@@ -811,8 +811,12 @@ fn score_functions(
         }
         // Synthetic wrapper functions overlap the extent of a real def;
         // sampling them would double-count the same lines and degrade
-        // the positional null into noise. See `Language::is_synthetic`.
-        if lang.is_synthetic(&ir.id.name) {
+        // the positional null into noise. `Statement` profile means this
+        // function came through a tree-sitter lowering (`score_tree`'s
+        // `via_ts`, `score_crate`'s AST fallback) rather than a
+        // bytecode/MIR primary — see `Language::is_synthetic`'s doc on why
+        // that distinction matters for Rust.
+        if lang.is_synthetic(&ir.id.name, profile == PanelProfile::Statement) {
             continue;
         }
         let sal = analyze_with_scorer(
@@ -1752,15 +1756,15 @@ mod tests {
 
     #[test]
     fn synthetic_name_filter_differs_by_language() {
-        assert!(Language::Python.is_synthetic("<module>"));
-        assert!(Language::Python.is_synthetic("<lambda>"));
-        assert!(!Language::Python.is_synthetic("checkout"));
+        assert!(Language::Python.is_synthetic("<module>", true));
+        assert!(Language::Python.is_synthetic("<lambda>", true));
+        assert!(!Language::Python.is_synthetic("checkout", true));
 
-        assert!(Language::JavaScript.is_synthetic("<module>"));
+        assert!(Language::JavaScript.is_synthetic("<module>", false));
         // JS anonymous functions must stay scorable: excluding them the way
         // Python excludes lambdas would drop most real JS code.
-        assert!(!Language::JavaScript.is_synthetic("<fn@12>"));
-        assert!(!Language::JavaScript.is_synthetic("checkout"));
+        assert!(!Language::JavaScript.is_synthetic("<fn@12>", false));
+        assert!(!Language::JavaScript.is_synthetic("checkout", false));
     }
 
     /// `node_modules` lands in the copy as a real directory, never a

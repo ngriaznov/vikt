@@ -16,7 +16,9 @@
 //! callee string against a sibling's [`FunctionId::name`](crate::ir::FunctionId::name),
 //! or, failing that, an unambiguous match on the trailing `::`/`.`-separated
 //! segment. A callee matching more than one candidate, under either rule,
-//! resolves to nothing rather than guessing.
+//! resolves to nothing rather than guessing. Same-file candidates are tried
+//! before the search ever widens past that file — see [`resolve_callee`]'s
+//! docs on why, which matters once [`repo_scores`] is in play.
 //!
 //! # Function features
 //!
@@ -48,10 +50,12 @@
 //! implementation: every function below already treats `functions` as an
 //! opaque slice and never assumes its members share a file — `resolve_edges`
 //! matches callees by name across the whole slice regardless of which
-//! function came from where, and [`function_features`]/[`function_weights`]
-//! are already correct for a cross-file call graph. The one thing that
-//! *does* assume a single file is bare line numbers as a key: two different
-//! files can each have a line 10. [`repo_scores`] and [`line_owners_by_file`]
+//! function came from where (preferring a same-file candidate over a
+//! same-named one elsewhere, per [`resolve_callee`]'s docs), and
+//! [`function_features`]/[`function_weights`] are already correct for a
+//! cross-file call graph. The one thing that *does* assume a single file is
+//! bare line numbers as a key: two different files can each have a line 10.
+//! [`repo_scores`] and [`line_owners_by_file`]
 //! key on `(file, line)` instead — the file coming from each function's own
 //! [`FunctionIr::id`]'s `file` — so the identical weighting and
 //! rank-normalisation can run once across every scored function in a repo or
@@ -254,13 +258,17 @@ pub fn function_weights(functions: &[ScopedFunction<'_>]) -> Vec<f64> {
 /// by the matching rule documented on the module.
 fn resolve_edges(functions: &[ScopedFunction<'_>]) -> Vec<BTreeSet<usize>> {
     let names: Vec<&str> = functions.iter().map(|f| f.ir.id.name.as_str()).collect();
+    let files: Vec<&str> = functions.iter().map(|f| f.ir.id.file.as_str()).collect();
     functions
         .iter()
-        .map(|f| {
+        .enumerate()
+        .map(|(i, f)| {
             f.ir.nodes
                 .iter()
                 .filter_map(|node| match &node.kind {
-                    NodeKind::Call { callee, .. } => resolve_callee(callee, &names),
+                    NodeKind::Call { callee, .. } => {
+                        resolve_callee(callee, files[i], &names, &files)
+                    }
                     _ => None,
                 })
                 .collect()
@@ -270,14 +278,42 @@ fn resolve_edges(functions: &[ScopedFunction<'_>]) -> Vec<BTreeSet<usize>> {
 
 /// Resolves one callee string to a unique sibling, or declines.
 ///
-/// Exact name equality is tried first; if it matches more than one sibling
-/// (only possible with duplicate names), that call site resolves to nothing
-/// rather than picking one arbitrarily. Otherwise falls back to the trailing
-/// `::`/`.`-separated segment, again only when exactly one sibling's own
-/// trailing segment matches.
-fn resolve_callee(callee: &str, names: &[&str]) -> Option<usize> {
-    let mut exact = names.iter().enumerate().filter(|&(_, &n)| n == callee);
-    if let Some((only, _)) = exact.next() {
+/// Same-file candidates are tried first and, when any exist, are the only
+/// ones considered — a caller's own file defining the name it calls is a
+/// far stronger signal than a same-named function anywhere else in the
+/// repo, and letting a coincidental repo-wide namesake compete with it
+/// would turn a previously-unambiguous file-scope match into a declined
+/// one the moment [`repo_scores`] pulls in a same-named function from an
+/// unrelated file. Only when the caller's own file has no candidate at all
+/// does the search widen to every file passed in — matching a call across
+/// a file boundary being the entire point of that generalisation (see the
+/// module docs). Exact name equality is tried first at each tier; if it
+/// matches more than one candidate in that tier (only possible with
+/// duplicate names), that call site resolves to nothing rather than
+/// picking one arbitrarily. Otherwise falls back, within the same tier, to
+/// the trailing `::`/`.`-separated segment, again only when exactly one
+/// candidate's own trailing segment matches.
+fn resolve_callee(
+    callee: &str,
+    caller_file: &str,
+    names: &[&str],
+    files: &[&str],
+) -> Option<usize> {
+    let same_file: Vec<usize> = (0..names.len())
+        .filter(|&i| files[i] == caller_file)
+        .collect();
+    resolve_in(callee, &same_file, names)
+        .or_else(|| resolve_in(callee, &(0..names.len()).collect::<Vec<_>>(), names))
+}
+
+/// [`resolve_callee`]'s single-tier search: exact match, then trailing
+/// segment, over exactly the candidate indices given.
+fn resolve_in(callee: &str, candidates: &[usize], names: &[&str]) -> Option<usize> {
+    if candidates.is_empty() {
+        return None;
+    }
+    let mut exact = candidates.iter().copied().filter(|&i| names[i] == callee);
+    if let Some(only) = exact.next() {
         return if exact.next().is_none() {
             Some(only)
         } else {
@@ -288,13 +324,13 @@ fn resolve_callee(callee: &str, names: &[&str]) -> Option<usize> {
     if suffix.is_empty() {
         return None;
     }
-    let mut candidates = names
+    let mut matches = candidates
         .iter()
-        .enumerate()
-        .filter(|&(_, n)| last_segment(n) == suffix);
-    let first = candidates.next()?;
-    if candidates.next().is_none() {
-        Some(first.0)
+        .copied()
+        .filter(|&i| last_segment(names[i]) == suffix);
+    let first = matches.next()?;
+    if matches.next().is_none() {
+        Some(first)
     } else {
         None
     }
@@ -658,9 +694,13 @@ mod tests {
         };
         let functions = [&caller, &a, &b];
         let names: Vec<&str> = functions.iter().map(|f| f.id.name.as_str()).collect();
+        let files: Vec<&str> = functions.iter().map(|f| f.id.file.as_str()).collect();
         for node in &caller.nodes {
             if let NodeKind::Call { callee, .. } = &node.kind {
-                assert_eq!(resolve_callee(callee, &names), None);
+                assert_eq!(
+                    resolve_callee(callee, caller.id.file.as_str(), &names, &files),
+                    None
+                );
             }
         }
     }
@@ -877,5 +917,51 @@ mod tests {
     #[test]
     fn repo_scores_empty_input_is_empty() {
         assert!(repo_scores(&[]).is_empty());
+    }
+
+    /// A caller's own-file definition of the name it calls must win over a
+    /// same-named function elsewhere in the repo — without file-locality
+    /// priority, `repo_scores` pulling in `other.py`'s unrelated `helper`
+    /// would make the exact-name match ambiguous (two candidates named
+    /// `helper`) and silently drop an edge that was unambiguous at file
+    /// scope.
+    #[test]
+    fn repo_scores_prefers_same_file_callee_over_a_repo_wide_namesake() {
+        let caller = FunctionIr {
+            id: fid_in("caller.py", "caller"),
+            nodes: vec![call(1, "helper")],
+            entry: 0,
+        };
+        let local_helper = FunctionIr {
+            id: fid_in("caller.py", "helper"),
+            nodes: vec![Node::pure(2).with_kind(NodeKind::Return)],
+            entry: 0,
+        };
+        let unrelated_helper = FunctionIr {
+            id: fid_in("other.py", "helper"),
+            nodes: vec![Node::pure(1).with_kind(NodeKind::Return)],
+            entry: 0,
+        };
+        let irs = [caller, local_helper, unrelated_helper];
+        let denylist = Denylist::new();
+        let weights = ScoreWeights::default();
+        let sals: Vec<_> = irs
+            .iter()
+            .map(|ir| analyze(ir, &denylist, &weights))
+            .collect();
+        let lines: Vec<_> = irs.iter().map(line_scores_from_lines).collect();
+        let functions: Vec<ScopedFunction<'_>> = (0..irs.len())
+            .map(|i| ScopedFunction {
+                ir: &irs[i],
+                importance: &sals[i],
+                line_scores: &lines[i],
+            })
+            .collect();
+
+        let features = function_features(&functions);
+        assert!(
+            features[1].fan_in > features[2].fan_in,
+            "the same-file helper.py:helper must get the call's fan-in, not other.py's namesake: {features:?}"
+        );
     }
 }
