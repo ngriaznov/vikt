@@ -1,0 +1,14 @@
+{
+  "repo": "https://github.com/tailhook/humantime.git",
+  "commit": "76c8929b4cc286f675322475a8e1841f35bafc57",
+  "language": "rust",
+  "test_cmd": "cargo test",
+  "mutants_executed": 60,
+  "killed": 57,
+  "survived": 3,
+  "timed_out": 0,
+  "invalid": 0,
+  "panel_rho": 0.026,
+  "null_rho": 0.349,
+  "verdict": "insufficient data — 19 scored lines (needs >= 20) over 60 executed mutants (needs >= 30)"
+}
