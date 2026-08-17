@@ -106,6 +106,6 @@ fn default_output_is_still_the_sidecar() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout parses as JSON");
-    assert_eq!(v["schema"], "vikt-sidecar/v2");
+    assert_eq!(v["schema"], "vikt-sidecar/v3");
     assert!(v.get("$schema").is_none());
 }

@@ -37,6 +37,7 @@ fn sample() -> Sidecar {
                 rank: 1.0,
                 file_score: None,
                 repo_score: None,
+                text: None,
                 reasons: vec!["branch predicate".to_owned()],
             },
             SpanRecord {
@@ -47,6 +48,7 @@ fn sample() -> Sidecar {
                 rank: 0.5,
                 file_score: None,
                 repo_score: None,
+                text: None,
                 reasons: vec!["return".to_owned()],
             },
             SpanRecord {
@@ -57,6 +59,7 @@ fn sample() -> Sidecar {
                 rank: 0.0,
                 file_score: None,
                 repo_score: None,
+                text: None,
                 reasons: vec!["denylisted call".to_owned()],
             },
         ],
@@ -82,6 +85,7 @@ fn sample() -> Sidecar {
             rank: 1.0,
             file_score: None,
             repo_score: None,
+            text: None,
             reasons: vec!["loop-carried".to_owned()],
         }],
     });

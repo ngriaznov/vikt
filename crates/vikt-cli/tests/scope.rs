@@ -147,8 +147,19 @@ fn annotate_column_present_by_default_absent_under_function_scope() {
         .expect("running the vikt binary");
     assert!(default_out.status.success() && function_out.status.success());
 
-    let default_text = String::from_utf8_lossy(&default_out.stdout);
-    let function_text = String::from_utf8_lossy(&function_out.stdout);
+    // Stdout is the JSON sidecar followed by the `--annotate` dump; a span's
+    // own embedded `text` can now also contain the substring "function hub"
+    // (the hub's declaration line, verbatim), so the search must start after
+    // the `--- <path> ---` marker the annotate dump prints, not scan the
+    // whole of stdout.
+    let annotate_dump = |out: &[u8]| -> String {
+        let text = String::from_utf8_lossy(out).into_owned();
+        let marker = format!("--- {FIXTURE} ---");
+        let start = text.find(&marker).expect("annotate dump marker");
+        text[start..].to_owned()
+    };
+    let default_text = annotate_dump(&default_out.stdout);
+    let function_text = annotate_dump(&function_out.stdout);
     let default_line = default_text
         .lines()
         .find(|l| l.contains("function hub"))

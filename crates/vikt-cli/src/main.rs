@@ -327,6 +327,17 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .map_or_else(|| input.display().to_string(), |fi| fi.ir.id.file.clone());
     let mut sidecar = Sidecar::new(file_label, generator);
 
+    // Best-effort source, for embedding each span's `text`: a source-file
+    // frontend's `ir.id.file` is the exact path it was lowered from, so
+    // reading it back always succeeds; a bytecode input's is a name
+    // reconstructed from debug info (SMAP), not a path on disk, so the read
+    // fails and `--annotate`'s source - the one place vikt is ever told
+    // where such a file's source actually lives - is tried instead. Neither
+    // succeeding leaves spans without `text`, never a fabricated one.
+    // Cached per file path since one file's functions share one read.
+    let annotate_source = args.annotate.as_deref().and_then(read_source);
+    let mut source_cache: BTreeMap<String, Option<String>> = BTreeMap::new();
+
     let lowering = lower_started.elapsed();
     let analysis_started = Instant::now();
     let mut analyzed = 0usize;
@@ -358,7 +369,10 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             &weights,
             resolve_scorer(args.scorer, fi.profile),
         );
-        sidecar.push(ir, &sal);
+        let source = source_cache.entry(ir.id.file.clone()).or_insert_with(|| {
+            read_source(Path::new(&ir.id.file)).or_else(|| annotate_source.clone())
+        });
+        sidecar.push_with_source(ir, &sal, source.as_deref());
         analyzed += 1;
         if matches!(args.scope, Scope::File | Scope::Repo) {
             scoped.push((ir, sal));
@@ -677,6 +691,16 @@ fn print_text(sidecar: &vikt_core::Sidecar) {
             );
         }
     }
+}
+
+/// Best-effort source read for embedding [`vikt_core::SpanRecord::text`]:
+/// `None` on any I/O or UTF-8 failure rather than propagating it - unlike
+/// `--annotate`'s own read below, this is speculative (tried against every
+/// function's `ir.id.file`, most of which are never `--annotate`'s target)
+/// and its absence is itself meaningful output (`text` simply stays unset),
+/// not an error.
+fn read_source(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok()
 }
 
 /// The source with a tier marker per line, plus a file- or repo-scope score

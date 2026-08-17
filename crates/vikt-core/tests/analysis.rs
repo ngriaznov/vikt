@@ -339,6 +339,51 @@ fn tier_at_answers_the_hook_question() {
     assert_eq!(side.tier_at(99), None, "unmapped lines are not claimed");
 }
 
+/// `push_with_source` embeds each span's verbatim, right-trimmed source as
+/// `text`; plain `push` (no source available) leaves every span without one
+/// rather than fabricating an empty string.
+#[test]
+fn push_with_source_embeds_span_text_push_without_omits_it() {
+    const V: u32 = 1;
+    let ir = func(
+        "hooked",
+        vec![
+            Node::pure(10).with_dataflow([V], []).with_succs([1]),
+            Node::pure(11)
+                .with_dataflow([], [V])
+                .with_kind(NodeKind::Return),
+        ],
+    );
+    let sal = run(&ir);
+    // Line 10 carries trailing whitespace a right-trim must strip.
+    let source = "// header\n".repeat(9) + "int v = compute();   \nreturn v;\n";
+
+    let mut with_source = Sidecar::new("Demo.java", "test");
+    with_source.push_with_source(&ir, &sal, Some(&source));
+    with_source.finish();
+    let json = serde_json::to_string_pretty(&with_source).expect("serializes");
+    assert!(
+        json.contains(r#""text": "int v = compute();""#),
+        "line 10's span must carry its right-trimmed source: {json}"
+    );
+    assert!(
+        json.contains(r#""text": "return v;""#),
+        "line 11's span must carry its source: {json}"
+    );
+
+    let mut without_source = Sidecar::new("Demo.java", "test");
+    without_source.push(&ir, &sal);
+    without_source.finish();
+    for f in &without_source.functions {
+        for s in &f.spans {
+            assert!(
+                s.text.is_none(),
+                "plain push() must never fabricate text when no source was given: {s:?}"
+            );
+        }
+    }
+}
+
 /// Malformed frontend output is reported, not tolerated.
 #[test]
 fn validate_rejects_dangling_edges() {

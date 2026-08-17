@@ -23,16 +23,20 @@ use crate::ir::FunctionIr;
 
 /// Schema identifier, bumped on any breaking change to the shape below.
 ///
-/// `SpanRecord::file_score` (added for `--scope file`) and
-/// `SpanRecord::repo_score` (added for `--scope repo`) are deliberately
-/// *not* such a change: each is optional, defaults to absent, and every
-/// struct here derives plain `Serialize`/`Deserialize` with no
-/// `deny_unknown_fields`, so an old reader ignores the new key and a new
-/// reader sees `None` on output that never set it. Reserve schema bumps for
-/// changes that remove, rename, or repurpose an existing field's meaning —
-/// exactly what v2 is: v1's per-span `score` is `function_score` from v2 on,
-/// renamed so its scope is unambiguous next to `file_score`.
-pub const SCHEMA: &str = "vikt-sidecar/v2";
+/// `SpanRecord::file_score` (added for `--scope file`), `SpanRecord::repo_score`
+/// (added for `--scope repo`) and `SpanRecord::text` (added to embed a span's
+/// source) are individually additive, not breaking changes: each is
+/// optional, defaults to absent, and every struct here derives plain
+/// `Serialize`/`Deserialize` with no `deny_unknown_fields`, so an old reader
+/// ignores a new key and a new reader sees `None` on output that never set
+/// it. Reserve schema bumps for changes that remove, rename, or repurpose an
+/// existing field's meaning — exactly what v2 was: v1's per-span `score` is
+/// `function_score` from v2 on, renamed so its scope is unambiguous next to
+/// `file_score`. v3 is [`FunctionRecord::file`] going from
+/// sometimes-omitted to unconditional (see its docs) — a genuine
+/// presence-contract change existing readers may depend on, unlike `text`
+/// riding along in the same bump.
+pub const SCHEMA: &str = "vikt-sidecar/v3";
 
 /// One tiered run of source lines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,12 +72,25 @@ pub struct SpanRecord {
     /// run — that is the point of the wider scope.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub repo_score: Option<f64>,
+    /// The verbatim source of the lines this span covers — [`start`](Self::start)
+    /// through [`end`](Self::end) inclusive, each right-trimmed of trailing
+    /// whitespace, newline-joined when the span covers more than one line.
+    /// What `--annotate` already shows, embedded here so the JSON is
+    /// self-describing without a second read of the source file. Present
+    /// only when source text was available when this sidecar was built —
+    /// always for a source-file frontend, only when `--annotate`'s source
+    /// was supplied for a bytecode input; never fabricated as an empty
+    /// string when it wasn't.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub text: Option<String>,
     /// Why this run got its tier.
     pub reasons: Vec<String>,
 }
 
 impl SpanRecord {
-    fn from_span(s: &LineSpan) -> Self {
+    /// `source_lines` is the owning function's file, pre-split on `\n` once
+    /// by the caller rather than per span — see [`Sidecar::push_with_source`].
+    fn from_span(s: &LineSpan, source_lines: Option<&[&str]>) -> Self {
         Self {
             start: s.start,
             end: s.end,
@@ -85,9 +102,27 @@ impl SpanRecord {
             rank: (s.rank * 100.0).round() / 100.0,
             file_score: None,
             repo_score: None,
+            text: source_lines.and_then(|lines| span_text(lines, s.start, s.end)),
             reasons: s.reasons.clone(),
         }
     }
+}
+
+/// The verbatim text of `lines[start..=end]` (1-based, inclusive), each line
+/// right-trimmed of trailing whitespace, newline-joined for a multi-line
+/// span. `None` when `start`/`end` don't both land inside `lines` — a
+/// source file that has drifted out of sync with the analyzed one (or is
+/// simply the wrong file) must not fabricate or misattribute text.
+fn span_text(lines: &[&str], start: u32, end: u32) -> Option<String> {
+    let start_idx = usize::try_from(start.checked_sub(1)?).ok()?;
+    let end_idx = usize::try_from(end.checked_sub(1)?).ok()?;
+    let span = lines.get(start_idx..=end_idx)?;
+    Some(
+        span.iter()
+            .map(|line| line.trim_end())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 /// How much of the body carried source positions at all.
@@ -120,12 +155,19 @@ pub struct TierCounts {
 /// The importance map for one function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionRecord {
-    /// Source file this function's lines refer to. Omitted when it matches
-    /// the sidecar-level `file`, which keeps single-file output (every
-    /// frontend except cargo crate mode) byte-identical to before this field
-    /// existed. Crate mode spans many files and needs per-function
-    /// attribution.
-    #[serde(skip_serializing_if = "String::is_empty", default)]
+    /// Source file this function's lines refer to. Unconditional as of
+    /// schema v3: every record names its own file, so a consumer reading
+    /// one function at a time never has to cross-reference the sidecar-level
+    /// `file` to find out which source it belongs to — the gap that let a
+    /// multi-file (folder/repo) run emit one function record with no `file`
+    /// at all, whenever that function's file happened to match whichever
+    /// file [`Sidecar::file`] was set from. Before v3 this was omitted when
+    /// it matched the sidecar-level `file`, to keep single-file output
+    /// byte-identical to before the field existed. `#[serde(default)]` so a
+    /// v2 sidecar predating this change — which may still omit it — still
+    /// deserializes, falling back to the empty string exactly as v2 readers
+    /// already had to handle.
+    #[serde(default)]
     pub file: String,
     /// Fully-qualified name.
     pub name: String,
@@ -168,8 +210,24 @@ impl Sidecar {
         }
     }
 
-    /// Appends the analysis of one function.
+    /// Appends the analysis of one function. Spans carry no [`SpanRecord::text`] —
+    /// equivalent to [`Self::push_with_source`] with `source: None`, for a
+    /// caller with no source text on hand (or that doesn't want it embedded).
     pub fn push(&mut self, ir: &FunctionIr, sal: &FunctionImportance) {
+        self.push_with_source(ir, sal, None);
+    }
+
+    /// [`Self::push`], additionally embedding each span's [`SpanRecord::text`]
+    /// from `source` — the full text of the file `ir` was lowered from.
+    /// `None` when no source text is available for this function (a
+    /// bytecode input with no `--annotate` source supplied): every span's
+    /// `text` is then `None` too, never a fabricated empty string.
+    pub fn push_with_source(
+        &mut self,
+        ir: &FunctionIr,
+        sal: &FunctionImportance,
+        source: Option<&str>,
+    ) {
         let spans = project_to_lines(ir, sal);
         let mut summary = TierCounts::default();
         for s in &spans {
@@ -181,12 +239,9 @@ impl Sidecar {
                 Tier::Inert => summary.inert += lines,
             }
         }
+        let source_lines: Option<Vec<&str>> = source.map(|s| s.lines().collect());
         self.functions.push(FunctionRecord {
-            file: if ir.id.file == self.file {
-                String::new()
-            } else {
-                ir.id.file.clone()
-            },
+            file: ir.id.file.clone(),
             name: ir.id.name.clone(),
             signature: ir.id.signature.clone(),
             decl_line: ir.id.decl_line,
@@ -195,7 +250,10 @@ impl Sidecar {
                 with_line: ir.nodes.iter().filter(|n| n.line.is_some()).count(),
             },
             summary,
-            spans: spans.iter().map(SpanRecord::from_span).collect(),
+            spans: spans
+                .iter()
+                .map(|s| SpanRecord::from_span(s, source_lines.as_deref()))
+                .collect(),
         });
     }
 
@@ -320,5 +378,49 @@ impl Sidecar {
             }
         }
         best.map(|(_, name)| name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::span_text;
+
+    #[test]
+    fn single_line_span_is_right_trimmed() {
+        let lines = ["fn hub(x) {   ", "    x + 1", "}"];
+        assert_eq!(
+            span_text(&lines, 1, 1).as_deref(),
+            Some("fn hub(x) {"),
+            "trailing whitespace on the covered line must not survive into `text`"
+        );
+    }
+
+    #[test]
+    fn multi_line_span_is_newline_joined_and_each_line_right_trimmed() {
+        let lines = ["fn hub(x) {  ", "    x + 1   ", "}"];
+        assert_eq!(
+            span_text(&lines, 1, 3).as_deref(),
+            Some("fn hub(x) {\n    x + 1\n}"),
+            "every covered line must be right-trimmed on its own, then newline-joined"
+        );
+    }
+
+    #[test]
+    fn span_past_the_end_of_the_file_is_none_not_fabricated() {
+        let lines = ["only line"];
+        assert_eq!(
+            span_text(&lines, 1, 2),
+            None,
+            "a span whose end line doesn't exist must not fabricate partial text"
+        );
+        assert_eq!(span_text(&lines, 5, 5), None);
+    }
+
+    #[test]
+    fn zero_line_is_none() {
+        // 1-based lines: `start: 0` cannot occur from a real lowering, but
+        // must not underflow or panic if it somehow did.
+        let lines = ["a"];
+        assert_eq!(span_text(&lines, 0, 0), None);
     }
 }

@@ -109,11 +109,18 @@ fn every_instruction_carries_a_line() {
 
 #[test]
 fn lowering_is_deterministic() {
-    let (Some(a), Some(b)) = (sidecar_for(SOURCE), sidecar_for(SOURCE)) else {
+    let (Some(mut a), Some(mut b)) = (sidecar_for(SOURCE), sidecar_for(SOURCE)) else {
         return;
     };
-    // The file path differs between runs by construction, so compare the part
-    // that must be stable.
+    // The file path differs between runs by construction (each gets its own
+    // uniquely named temp file, and every function's own `file` now carries
+    // it unconditionally - see `FunctionRecord::file`), so blank it out on
+    // both sides before comparing the part that must be stable.
+    for side in [&mut a, &mut b] {
+        for f in &mut side.functions {
+            f.file.clear();
+        }
+    }
     assert_eq!(
         serde_json::to_string(&a.functions).unwrap(),
         serde_json::to_string(&b.functions).unwrap()
