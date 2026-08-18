@@ -70,7 +70,7 @@ including every candidate that was tried and cut, lives in `eval/`.
 
 With the tier, every span carries two numbers:
 
-- **`score`**: `0.0..=1.0` against a fixed scale. For thresholds and policy.
+- **`function_score`**: `0.0..=1.0` against a fixed scale. For thresholds and policy.
 - **`rank`**: percentile within its own function. For heatmaps, and for "show
   me the top of this body". A function whose scores all sit near 0.3 still has a
   most-important line; painting it against the global scale would render the
@@ -447,8 +447,8 @@ function (the panel above) and its function's standing in the file — a
 weight from four rank-normalised call-graph signals (call-graph depth,
 fan-in, size share, boundary density), computed over the file's intra-file
 call graph with conservative name matching. The blend is re-ranked across
-the file and emitted as `file_score` on every sidecar span; `score`, `rank`
-and tiers are untouched, and files never compete with each other. `--scope
+the file and emitted as `file_score` on every sidecar span; `function_score`,
+`rank` and tiers are untouched, and files never compete with each other. `--scope
 function` drops the layer and restores the pre-file-scope artifact
 byte-for-byte.
 
@@ -457,8 +457,9 @@ signals and the blend are computed *once* across every scored function of
 the run, cross-file edges allowed (still conservative name matching — an
 ambiguous callee resolves to no edge, never a guess), and the re-rank runs
 over every scored line of the run at once instead of per file. Emitted as
-`repo_score`, additive next to `file_score`; a single-file input can still
-ask for it, but it earns its keep on a folder, a cargo package, or anything
+`repo_score`, taking `file_score`'s place — a run carries one blend layer,
+named for the scope that produced it. A single-file input can still ask for
+it, but it earns its keep on a folder, a cargo package, or anything
 spanning more than one file. `vikt calibrate` measures whichever scope it is
 given (default `file`, against a file-wide positional null; `repo` pairs the
 same cross-file blend against that same per-file positional null, pooled
@@ -561,10 +562,11 @@ Both demos are the same program in two languages, and produce the same tiering.
 
 ```json
 {
-  "schema": "vikt-sidecar/v2",
+  "schema": "vikt-sidecar/v3",
   "generator": "vikt-jvm/mokapot",
   "file": "OrderProcessor.java",
   "functions": [{
+    "file": "OrderProcessor.java",
     "name": "OrderProcessor::process",
     "signature": "(Ljava/util/List;, D, Z) -> double",
     "decl_line": 11,
@@ -572,9 +574,13 @@ Both demos are the same program in two languages, and produce the same tiering.
     "summary": { "core": 6, "boundary": 2, "plumbing": 1, "inert": 4 },
     "spans": [
       { "start": 21, "end": 21, "tier": "core", "function_score": 0.8,
+        "rank": 0.9, "file_score": 0.85,
+        "text": "            subtotal += price;",
         "reasons": ["loop-carried definition at nesting depth 1",
                     "reaches state write OrderProcessor#runningTotal in 1 dependence step(s)"] },
       { "start": 22, "end": 22, "tier": "inert", "function_score": 0.0,
+        "rank": 0.0, "file_score": 0.0,
+        "text": "            inspected++;",
         "reasons": ["builds arguments for a denylisted call only"] }
     ]
   }]
@@ -584,6 +590,18 @@ Both demos are the same program in two languages, and produce the same tiering.
 `coverage` is the honesty field: when a substrate loses line attribution, a
 consumer needs to know it is looking at an incomplete map rather than a body
 that genuinely has no core.
+
+`text` is the span's own source, verbatim (right-trimmed, newline-joined for
+multi-line spans), so the sidecar reads standalone. Source-language inputs
+always carry it; a `.class` input carries it when `--annotate` supplies the
+source, and omits the field otherwise rather than emitting empty strings.
+Every function record names its `file`, so multi-file sidecars (folders,
+cargo packages, `--scope repo` runs) need no back-reference to the top-level
+field. Anonymous closures carry a derived name where the syntax provides one
+(`const createStyler = …` → `createStyler`, object properties, class
+fields); a truly anonymous body is qualified by its named enclosing function
+(`applyStyle.<anon@42>`), so `<fn@LINE>` appears only at top level with
+nothing to derive from.
 
 ## Performance
 
@@ -665,19 +683,20 @@ enters that loop.
 
 ## Tests
 
-249 tests: 47 in the core over hand-built IR (pinning each instrument's
-algorithm, the panel's weights, the file/repo-scope blend, and the
-cross-language mutation-masking rules shared by the tree-sitter calibration
-engines — none of it any frontend's lowering), 17 integration tests over the
-analysis pipeline, 10 over the SARIF projection and the calibration
-statistics, 11 over real SMAP attribute text and synthetic state machines, 8
-over real `javac -g` and `kotlinc` output, 5 over real CPython bytecode, 4
-over the Python mutant generator, 17 over real oxc lowering of JavaScript
-and TypeScript, 11 over real MIR lowering of Rust and its masked-token
-mutation splicer, 59 over the generic tree-sitter walker across Python,
-Java, Kotlin, Rust and Go source (`vikt-ts`, one suite per grammar table),
-59 over the CLI (including a calibration run per language and a folder-walk
-that asserts the input tree comes out byte-identical), 1 doctest. The JVM,
+274 tests: 80 in the core (hand-built IR pinning each instrument's
+algorithm, the panel's weights, the file/repo-scope blend, the
+cross-language mutation-masking rules shared by the calibration engines,
+span-text extraction, the analysis pipeline and the SARIF projection — none
+of it any frontend's lowering), 19 over real SMAP attribute text, synthetic
+state machines and `javac -g`/`kotlinc` output, 9 over real CPython
+bytecode and the Python mutant generator, 28 over real oxc lowering of
+JavaScript and TypeScript including the contextual closure-naming rules, 11
+over real MIR lowering of Rust and its masked-token mutation splicer, 62
+over the generic tree-sitter walker across Python, Java, Kotlin, Rust and
+Go source (`vikt-ts`, one suite per grammar table), 65 over the CLI
+(including a calibration run per language, folder walks that assert the
+input tree comes out byte-identical, and the default test-file skip), 1
+doctest. The JVM,
 Python and JS suites assert the *same* behavioral claims against equivalent
 source — the accumulator that reaches a state write is core, the counter
 that only feeds logging is inert — which is the multi-language claim stated
